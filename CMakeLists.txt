@@ -15,4 +15,4 @@ add_subdirectory(remote_fuse)
 add_subdirectory(file_server)
 
 # build the fuse server (unreliable file system)
-add_subdirectory(unreliablefs)
+add_subdirectory(fuse_server)
