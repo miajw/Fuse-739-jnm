@@ -37,14 +37,36 @@ using grpc::Status;
 using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
+using helloworld::PathName;
+using helloworld::IntegerValue;
+
+int debug_flag = 1;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
-  Status SayHello(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
+  Status SayHello(ServerContext* context, const HelloRequest* request, HelloReply* reply) override {
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
     return Status::OK;
+  }
+
+  Status RPC_rmdir(ServerContext* context, const PathName* request, IntegerValue* reply) override {
+      std::string path = request->path();
+      int ret = rmdir(path.c_str());
+      if(ret) {
+          reply->set_value(errno);
+      } else {
+          reply->set_value(0);
+      }
+
+      if(debug_flag) {
+          if(ret) {
+              std::cout << "RPC_rmdir path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << std::endl;
+          } else {
+              std::cout << "RPC_rmdir path: [" << path << "] OK" << std::endl;
+          }
+      }
+      return Status::OK;
   }
 };
 

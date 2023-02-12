@@ -29,6 +29,10 @@ using grpc::Status;
 using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
+using helloworld::PathName;
+using helloworld::IntegerValue;
+
+extern int debug_flag;
 
 class GreeterClient {
 public:
@@ -60,6 +64,35 @@ public:
             return "RPC failed";
         }
     }
+
+    int rmdir(const std::string& path) {
+        PathName request;
+        request.set_path(path);
+
+        IntegerValue reply;
+        ClientContext context;
+        Status status = stub_->RPC_rmdir(&context, request, &reply);
+
+        if (status.ok()) {
+            int ret = reply.value();
+            if(ret) {
+                errno = ret;
+                if(debug_flag) {
+                    std::cout << "rmdir path: [" << path << "] errno:" << errno << " " << strerror(errno) << std::endl;
+                }
+                return -ret;
+            } else {
+                if(debug_flag) {
+                    std::cout << "rmdir path: [" << path << "] OK" << std::endl;
+                }
+                return 0;
+            }
+        } else {
+            std::cout << "rmdir path: [" << path << "] rpc not ok -- " << status.error_code() << ": " << status.error_message() << std::endl;
+            return -1;
+        }
+    }
+
 
     ~GreeterClient() {
         std::cout << "\n Destructor executed";
@@ -142,14 +175,8 @@ extern "C" int rpc_unlink(const char *path)
     return 0;
 }
 
-extern "C" int rpc_rmdir(const char *path)
-{
-    int ret = rmdir(path);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
+extern "C" int rpc_rmdir(const char *path) {
+    return greeterPtr->rmdir(path);
 }
 
 extern "C" int rpc_symlink(const char *target, const char *linkpath)
