@@ -1,6 +1,8 @@
 
 add_library(remote_fuse "remote_fuse.cc")
 
+target_compile_options(remote_fuse PUBLIC -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Wno-unused-parameter)
+
 target_link_libraries(remote_fuse
         hw_grpc_proto
         ${_REFLECTION}
