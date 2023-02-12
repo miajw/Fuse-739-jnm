@@ -1,84 +1,18 @@
-# Copyright 2018 gRPC authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-# cmake build file for C++ helloworld example.
-# Assumes protobuf and gRPC have been installed using cmake.
-# See cmake_externalproject/CMakeLists.txt for all-in-one cmake build
-# that automatically builds all the dependencies before building helloworld.
 
 cmake_minimum_required(VERSION 3.5.1)
 
-
-project(HelloWorld C CXX)
+project(Fuse-739-jnm C CXX)
 
 include(./common.cmake)
 
-set_source_files_properties(greeter_client.cc PROPERTIES COMPILE_OPTIONS "-D_FILE_OFFSET_BITS=64")
+# build the gRPC stuff for our protobuf API
+add_subdirectory(grpc_fuse)
 
-# Proto file
-get_filename_component(hw_proto "./helloworld.proto" ABSOLUTE)
-get_filename_component(hw_proto_path "${hw_proto}" PATH)
+# build the library that the unreliable filesystem uses for remote calls
+add_subdirectory(remote_fuse)
 
-# Generated sources
-set(hw_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/helloworld.pb.cc")
-set(hw_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/helloworld.pb.h")
-set(hw_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/helloworld.grpc.pb.cc")
-set(hw_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/helloworld.grpc.pb.h")
-add_custom_command(
-      OUTPUT "${hw_proto_srcs}" "${hw_proto_hdrs}" "${hw_grpc_srcs}" "${hw_grpc_hdrs}"
-      COMMAND ${_PROTOBUF_PROTOC}
-      ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
-        --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
-        -I "${hw_proto_path}"
-        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
-        "${hw_proto}"
-      DEPENDS "${hw_proto}")
+# build the file server which processes the remote calls
+add_subdirectory(file_server)
 
-# Include generated *.pb.h files
-include_directories("${CMAKE_CURRENT_BINARY_DIR}")
-
-# hw_grpc_proto
-add_library(hw_grpc_proto
-  ${hw_grpc_srcs}
-  ${hw_grpc_hdrs}
-  ${hw_proto_srcs}
-  ${hw_proto_hdrs})
-target_link_libraries(hw_grpc_proto
-  ${_REFLECTION}
-  ${_GRPC_GRPCPP}
-  ${_PROTOBUF_LIBPROTOBUF})
-
-add_executable(file_server "file_server.cc")
-target_link_libraries(file_server
-        hw_grpc_proto
-        ${_REFLECTION}
-        ${_GRPC_GRPCPP}
-        ${_PROTOBUF_LIBPROTOBUF})
-
-
-add_executable(fuse_server
-
-        "unreliablefs_ops.cc"
-        "unreliablefs.cc"
-        "unreliablefs_errinj.c"
-        "unreliablefs_conf.c")
-
-target_compile_options(fuse_server PUBLIC -D_FILE_OFFSET_BITS=64 -Wmissing-field-initializers -Wwrite-strings -Wextra -Wno-unused-parameter)
-
-target_link_libraries(fuse_server
-        hw_grpc_proto
-        ${_REFLECTION}
-        ${_GRPC_GRPCPP}
-        ${_PROTOBUF_LIBPROTOBUF}
-        fuse)
+# build the fuse server (unreliable file system)
+add_subdirectory(unreliablefs)
