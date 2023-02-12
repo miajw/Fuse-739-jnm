@@ -59,15 +59,26 @@ target_link_libraries(hw_grpc_proto
   ${_GRPC_GRPCPP}
   ${_PROTOBUF_LIBPROTOBUF})
 
-# Targets greeter_[async_](client|server)
-foreach(_target
-  greeter_client greeter_server )
-  add_executable(${_target} "${_target}.cc")
-  target_link_libraries(${_target}
-    hw_grpc_proto
-    ${_REFLECTION}
-    ${_GRPC_GRPCPP}
-    ${_PROTOBUF_LIBPROTOBUF}
-    fuse)
+add_executable(file_server "file_server.cc")
+target_link_libraries(file_server
+        hw_grpc_proto
+        ${_REFLECTION}
+        ${_GRPC_GRPCPP}
+        ${_PROTOBUF_LIBPROTOBUF})
 
-endforeach()
+
+add_executable(fuse_server
+
+        "unreliablefs_ops.cc"
+        "unreliablefs.cc"
+        "unreliablefs_errinj.c"
+        "unreliablefs_conf.c")
+
+target_compile_options(fuse_server PUBLIC -D_FILE_OFFSET_BITS=64 -Wmissing-field-initializers -Wwrite-strings -Wextra -Wno-unused-parameter)
+
+target_link_libraries(fuse_server
+        hw_grpc_proto
+        ${_REFLECTION}
+        ${_GRPC_GRPCPP}
+        ${_PROTOBUF_LIBPROTOBUF}
+        fuse)
