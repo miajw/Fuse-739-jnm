@@ -8,13 +8,13 @@ it will build get all our dependencies and build gRPC (it takes a long time the 
 
 
 # command to make the Makefile
-cmake .. "-DCMAKE_TOOLCHAIN_FILE=/home/ubuntu/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake .. "-DCMAKE_TOOLCHAIN_FILE=/users/lidukhov/P1/Fuse-739-jnm/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 # to build the project
 
 cd Fuse-739-jnm 
 mkdir build
-cmake .. "-DCMAKE_TOOLCHAIN_FILE=/home/ubuntu/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake .. "-DCMAKE_TOOLCHAIN_FILE=/users/lidukhov/P1/Fuse-739-jnm/vcpkg/scripts/buildsystems/vcpkg.cmake"
 make
 
 

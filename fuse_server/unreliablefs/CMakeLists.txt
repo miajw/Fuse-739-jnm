@@ -7,6 +7,8 @@ set(UNRELIABLEFS_SRC conf.c
                      unreliablefs_errinj.c
                      unreliablefs_ops.c)
 
+set(FUSE_LIBRARIES /usr/lib/x86_64-linux-gnu/libfuse.so)
+
 find_package(FUSE 2.9 REQUIRED)
 
 add_definitions(${FUSE_DEFINITIONS})
