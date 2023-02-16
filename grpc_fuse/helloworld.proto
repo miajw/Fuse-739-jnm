@@ -12,7 +12,18 @@ package helloworld;
 service Greeter {
   // Sends a greeting
   rpc SayHello (HelloRequest) returns (HelloReply) {}
+  // Remove a directory
   rpc RPC_rmdir (PathName) returns (IntegerValue) {}
+  // Create a directory
+  rpc RPC_mkdir (PathModeRequest) returns (IntegerValue) {}
+  // We don't need linking but FUSE uses unlink to delete files
+  rpc RPC_unlink (PathName) returns (IntegerValue) {}
+  // Create a file
+  rpc RPC_create (PathModeRequest) returns (IntegerValue) {}
+  // Open a file
+  rpc RPC_open (PathName) returns (IntegerValue) {}
+  // Close a file
+  rpc RPC_release (PathName) returns (IntegerValue) {}
 }
 
 // The request message containing the user's name.
@@ -31,4 +42,9 @@ message PathName {
 
 message IntegerValue {
   int32 value = 1;
+}
+
+message PathModeRequest {
+  string path = 1;
+  uint32 mode = 2;
 }

@@ -25,7 +25,6 @@
 #include <grpcpp/health_check_service_interface.h>
 
 #ifdef BAZEL_BUILD
-#include "examples/protos/helloworld.grpc.pb.h"
 #else
 #include "helloworld.grpc.pb.h"
 #endif
