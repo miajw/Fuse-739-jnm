@@ -2,17 +2,14 @@ cmake_minimum_required(VERSION 3.10.2)
 
 include(CheckFunctionExists)
 
-set(UNRELIABLEFS_SRC conf.c
-                     unreliablefs.c
-                     unreliablefs_errinj.c
-                     unreliablefs_ops.c)
+set(UNRELIABLEFS_SRC conf.c unreliablefs.c unreliablefs_errinj.c unreliablefs_ops.c)
 
 find_package(FUSE 2.9 REQUIRED)
 
 add_definitions(${FUSE_DEFINITIONS})
 add_executable(${PROJECT_NAME} ${UNRELIABLEFS_SRC})
 target_include_directories(${PROJECT_NAME} PRIVATE ${FUSE_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} ${FUSE_LIBRARIES} remote_fuse)
+target_link_libraries(${PROJECT_NAME} ${FUSE_LIBRARIES} local_fuse)
 
 target_compile_options(${PROJECT_NAME} PUBLIC -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Wno-unused-parameter)
 target_compile_options(${PROJECT_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++11 -D_FILE_OFFSET_BITS=64>)

@@ -12,7 +12,6 @@
 
 #include "unreliablefs_ops.h"
 #include "unreliablefs.h"
-#include "remote_fuse.h"
 
 extern struct err_inj_q *config_init(const char* conf_path);
 extern void config_delete(struct err_inj_q *config);
@@ -177,14 +176,6 @@ int main(int argc, char *argv[])
         perror("pthread_mutex_init");
         return EXIT_FAILURE;
     }
-
-    fprintf(stdout, "initializing RPC\n");
-    if(initialize_rpc()) {
-        fuse_opt_free_args(&args);
-        fprintf(stderr, "unable to initialize remote rpc.\n");
-        return EXIT_FAILURE;
-    }
-
 
     fprintf(stdout, "starting FUSE filesystem unreliablefs\n");
     int ret = fuse_main(args.argc, args.argv, &unreliable_ops, NULL);

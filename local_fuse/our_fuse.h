@@ -3,8 +3,10 @@
 
 #include <fuse.h>
 
-int rpc_receive_file(const char *path, int fd, size_t* size);
+void *rpc_init(struct fuse_conn_info *conn);
+void rpc_destroy(void *private_data);
 
+int rpc_statfs(const char *, struct statvfs *);
 int rpc_getattr(const char *, struct stat *);
 int rpc_readlink(const char *, char *, size_t);
 int rpc_mknod(const char *, mode_t, dev_t);
@@ -17,13 +19,13 @@ int rpc_link(const char *, const char *);
 int rpc_chmod(const char *, mode_t);
 int rpc_chown(const char *, uid_t, gid_t);
 int rpc_truncate(const char *, off_t);
+
 int rpc_open(const char *, struct fuse_file_info *);
 int rpc_read(const char *, char *, size_t, off_t, struct fuse_file_info *);
 int rpc_write(const char *, const char *, size_t, off_t, struct fuse_file_info *);
-int rpc_statfs(const char *, struct statvfs *);
 int rpc_flush(const char *, struct fuse_file_info *);
-int rpc_release(const char *, struct fuse_file_info *);
 int rpc_fsync(const char *, int, struct fuse_file_info *);
+int rpc_release(const char *, struct fuse_file_info *);
 
 int rpc_setxattr(const char *, const char *, const char *, size_t, int);
 int rpc_getxattr(const char *, const char *, char *, size_t);
@@ -31,13 +33,9 @@ int rpc_listxattr(const char *, char *, size_t);
 int rpc_removexattr(const char *, const char *);
 
 int rpc_opendir(const char *, struct fuse_file_info *);
-int rpc_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-                       off_t offset, struct fuse_file_info *fi);
+int rpc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi);
 int rpc_releasedir(const char *, struct fuse_file_info *);
 int rpc_fsyncdir(const char *, int, struct fuse_file_info *);
-
-void *rpc_init(struct fuse_conn_info *conn);
-void rpc_destroy(void *private_data);
 
 int rpc_lstat(const char *path, struct stat *statbuf);
 int rpc_access(const char *, int);

@@ -19,7 +19,7 @@
 #define ERRNO_NOOP -999
 
 #include "unreliablefs_ops.h"
-#include "remote_fuse.h"
+#include "our_fuse.h"
 
 const char *fuse_op_name[] = {
     "getattr",
@@ -583,7 +583,8 @@ int unreliable_fallocate(const char *path, int mode, off_t offset, off_t len, st
         return ret;
     }
 
-    return rpc_fallocate(path, mode, offset, len, fi);
+    fprintf(stderr, "fallocate() not implemented path[%s], mode:%d offset:%lu len:%lu\n", path, mode, offset, len);
+    return EINVAL;
 }
 
 int unreliable_utimens(const char *path, const struct timespec ts[2]) {

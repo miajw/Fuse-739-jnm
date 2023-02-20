@@ -20,6 +20,10 @@
 #include <memory>
 #include <string>
 
+
+#include <dirent.h>
+#include <fcntl.h>
+
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
@@ -34,13 +38,28 @@ using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
+using grpc::ServerWriter;
+
 using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
-using helloworld::PathName;
-using helloworld::IntegerValue;
+using helloworld::CommonRequest;
+using helloworld::CommonResponse;
+using helloworld::Data;
 
-int debug_flag = 1;
+
+/**
+ * returns the number of nanoseconds since the beginning oof the epoch (1/1/    1970)
+ */
+uint64_t raw_time() {
+    struct timespec tstart;
+    clock_gettime(CLOCK_MONOTONIC, &tstart);
+    return ((uint64_t)tstart.tv_sec)*100000000000L + ((uint64_t)tstart.tv_nsec);
+}
+
+
+std::string root = "";
+int debug_flag = 0;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -50,24 +69,79 @@ class GreeterServiceImpl final : public Greeter::Service {
     return Status::OK;
   }
 
-  Status RPC_rmdir(ServerContext* context, const PathName* request, IntegerValue* reply) override {
-      std::string path = request->path();
-      int ret = rmdir(path.c_str());
-      if(ret) {
-          reply->set_value(errno);
-      } else {
-          reply->set_value(0);
-      }
-
+  void print_debug(std::string cmd, std::string path, int ret) {
       if(debug_flag) {
           if(ret) {
-              std::cout << "RPC_rmdir path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << std::endl;
+              std::cout << cmd << " path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << std::endl;
           } else {
-              std::cout << "RPC_rmdir path: [" << path << "] OK" << std::endl;
+              std::cout << cmd << " path: [" << path << "] OK" << std::endl;
           }
       }
-      return Status::OK;
   }
+
+
+    Status generate_response(std::string cmd, std::string path, int ret, CommonResponse* response) {
+        response->set_result(ret ? errno : 0);
+        print_debug(cmd, path, ret);
+        return Status::OK;
+    }
+
+    Status RPC_rmdir(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        std::string path = request->path1();
+        int ret = rmdir(path.c_str());
+        return generate_response("RPC_rmdir", path, ret, response);
+    }
+
+    Status RPC_sendfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
+        std::string path = root+request->path1();
+        size_t size = 0;
+        uint64_t start = raw_time();
+
+        int fd = open(path.c_str(), O_RDONLY);
+        if (fd == -1) {
+            print_debug("RPC_sendfile--open", path, fd);
+            Data data = Data();
+            data.set_result(errno);
+            writer->Write(data);
+            return Status::OK;
+        }
+
+        char buffer[65536];
+
+        while (1) {
+            int ret = read(fd, buffer, sizeof(buffer));
+            if (ret < 0) {
+                // got an error
+                print_debug("RPC_sendfile--read", path, fd);
+                Data data = Data();
+                data.set_result(errno);
+                writer->Write(data);
+                break;
+            } else if (ret == 0) {
+                // end of file reached
+                break;
+            } else {
+                // we got data
+                size += ret;
+                Data data = Data();
+                data.set_result(0);
+                data.set_data(std::string(buffer, ret));
+                writer->Write(data);
+            }
+        }
+
+        int close_result = close(fd);
+        if(close_result) {
+            print_debug("RPC_sendfile--close", path, close_result);
+        }
+
+        if( debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            std::cout << "RPC_sendfile " << path << " size:" << size << " elapsed:" << elapsed << std::endl;
+        }
+
+        return Status::OK;
+    }
 };
 
 void RunServer() {
@@ -91,8 +165,43 @@ void RunServer() {
   server->Wait();
 }
 
-int main(int argc, char** argv) {
-  RunServer();
+void usage(char* name, char* msg) {
+    printf("error: %s\n", msg);
+    printf("usage: %s -d -r <path to root>\n", name);
+    printf("-d: debug mode -- prints out lots of stuff\n");
+    exit(-1);
+}
 
-  return 0;
+int main(int argc, char** argv) {
+
+    int c = 0;
+    while ((c = getopt (argc, argv, "dr:")) != -1) {
+        switch (c) {
+            case 'd':
+                debug_flag = 1;
+                break;
+            case 'r':
+                root = std::string(optarg);
+                break;
+            default:
+                abort();
+        }
+    }
+
+    if(root.length() == 0) {
+        usage(argv[0], (char*) "root is required!");
+    }
+
+    DIR *dir = opendir(root.c_str());
+    if(dir == NULL) {
+        usage(argv[0], (char*) "could opendir the root");
+    }
+    closedir(dir);
+
+    if(debug_flag) {
+        printf("%s starting with filesystem root:[%s]\n", argv[0], root.c_str());
+    }
+
+    RunServer();
+    return 0;
 }

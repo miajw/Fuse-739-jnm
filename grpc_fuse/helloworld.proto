@@ -12,7 +12,13 @@ package helloworld;
 service Greeter {
   // Sends a greeting
   rpc SayHello (HelloRequest) returns (HelloReply) {}
-  rpc RPC_rmdir (PathName) returns (IntegerValue) {}
+
+  rpc RPC_getattr(CommonRequest) returns (StatStruct) {}
+  rpc RPC_readlink(CommonRequest) returns (CommonResponse) {}
+  rpc RPC_rmdir (CommonRequest) returns (CommonResponse) {}
+
+  rpc RPC_sendfile(CommonRequest)  returns(stream Data) {}
+//  rpc RPC_writefile(CommonRequest)  returns(stream Data) {}
 }
 
 // The request message containing the user's name.
@@ -25,10 +31,54 @@ message HelloReply {
   string message = 1;
 }
 
-message PathName {
-  string path = 1;
+message CommonRequest {
+  string path1 = 1;
+  string path2 = 2;
+  int64 value1 = 3;
+  int64 value2 = 4;
 }
 
-message IntegerValue {
-  int32 value = 1;
+message CommonResponse {
+  int32 result = 1;
+}
+
+message Data {
+    int32 result = 1;
+    bytes data = 2;
+}
+
+message StatStruct {
+  int32  result = 1;
+  uint64 dev = 2;
+  uint64 ino = 3;
+  uint64 mode = 4;
+  uint64 nlink = 5;
+  uint64 uid = 6;
+  uint64 gid = 7;
+  uint64 rdev = 8;
+  uint64 size = 9;
+  uint64 asec = 10;
+  uint64 anano = 11;
+  uint64 msec = 12;
+  uint64 mnano = 13;
+  uint64 csec = 14;
+  uint64 cnano = 15;
+  uint64 blksize = 16;
+  uint64 blocks = 17;
+  uint64 attr = 18;
+}
+
+message StatvfsStruct {
+  int32  result = 1;
+  uint64 bsize = 2;
+  uint64 frsize = 3;
+  uint64 blocks = 4;
+  uint64 bfree= 5;
+  uint64 bavail = 6;
+  uint64 files = 7;
+  uint64 ffree = 8;
+  uint64 favail = 9;
+  uint64 fsid = 10;
+  uint64 flag = 11;
+  uint64 namemax = 12;
 }
