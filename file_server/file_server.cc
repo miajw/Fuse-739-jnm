@@ -19,10 +19,23 @@
 #include <iostream>
 #include <memory>
 #include <string>
-
+#include <vector>
 
 #include <dirent.h>
-#include <fcntl.h>
+#include <errno.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+
+#include <sys/ioctl.h>
+#include <sys/file.h>
+#include <sys/xattr.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+
+
+
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
@@ -39,13 +52,19 @@ using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 using grpc::ServerWriter;
+using grpc::ServerReader;
 
 using helloworld::Greeter;
 using helloworld::HelloReply;
 using helloworld::HelloRequest;
 using helloworld::CommonRequest;
 using helloworld::CommonResponse;
+using helloworld::ReceiveFileRequest;
+using helloworld::ReceiveFileResponse;
 using helloworld::Data;
+using helloworld::TimeSpec;
+using helloworld::StatStruct;
+using helloworld::StatvfsStruct;
 
 
 /**
@@ -69,33 +88,147 @@ class GreeterServiceImpl final : public Greeter::Service {
     return Status::OK;
   }
 
-  void print_debug(std::string cmd, std::string path, int ret) {
-      if(debug_flag) {
-          if(ret) {
-              std::cout << cmd << " path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << std::endl;
-          } else {
-              std::cout << cmd << " path: [" << path << "] OK" << std::endl;
-          }
-      }
-  }
+    void print_debug(std::string cmd, std::string path, int ret) {
+        if(debug_flag) {
+            if(ret) {
+                std::cout << cmd << " path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << std::endl;
+            } else {
+                std::cout << cmd << " path: [" << path << "] OK" << std::endl;
+            }
+        }
+    }
 
-
-    Status generate_response(std::string cmd, std::string path, int ret, CommonResponse* response) {
+    Status generate_response(std::string cmd, std::string path, int ret, CommonResponse* response, uint64_t start) {
         response->set_result(ret ? errno : 0);
-        print_debug(cmd, path, ret);
+        if(debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            if(ret) {
+                std::cout << cmd << " path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << " elapsed:" << elapsed << std::endl;
+            } else {
+                std::cout << cmd << " path: [" << path << "] OK" << " elapsed:" << elapsed << std::endl;
+            }
+        }
         return Status::OK;
     }
 
-    Status RPC_rmdir(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
-        std::string path = request->path1();
-        int ret = rmdir(path.c_str());
-        return generate_response("RPC_rmdir", path, ret, response);
+    Status RPC_getstatvfs(ServerContext* context, const CommonRequest* request, StatvfsStruct* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+
+        struct statvfs buf;
+        memset(&buf, 0, sizeof(struct statvfs));
+        int result = statvfs(path.c_str(), &buf);
+        if(result < 0) {
+            response->set_result(errno ? errno : EINVAL);
+            print_debug("RPC_getstatvfs--statvfs", path, result);
+            return Status::OK;
+        }
+
+        response->set_result(0);
+        response->set_bsize(buf.f_bsize);
+        response->set_frsize(buf.f_frsize);
+        response->set_blocks(buf.f_blocks);
+        response->set_bfree(buf.f_bfree);
+        response->set_bavail(buf.f_bavail);
+        response->set_files(buf.f_files);
+        response->set_ffree(buf.f_ffree);
+        response->set_favail(buf.f_favail);
+        response->set_fsid(buf.f_fsid);
+        response->set_flag(buf.f_flag);
+        response->set_namemax(buf.f_namemax);
+
+        if(debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            std::cout << "RPC_getstatvfs " << path << " elapsed:" << elapsed << std::endl;
+        }
+
+        return Status::OK;
     }
 
+
+    Status RPC_getattr(ServerContext* context, const CommonRequest* request, StatStruct* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+
+        struct stat buf;
+        memset(&buf, 0, sizeof(struct stat));
+        int result = lstat(path.c_str(), &buf);
+        if(result < 0) {
+            response->set_result(errno);
+            print_debug("RPC_getattr--lstat", path, result);
+            return Status::OK;
+        }
+
+        response->set_result(0);
+        response->set_dev(buf.st_dev);
+        response->set_ino(buf.st_ino);
+        response->set_mode(buf.st_mode);
+        response->set_nlink(buf.st_nlink);
+        response->set_uid(buf.st_uid);
+        response->set_gid(buf.st_gid);
+        response->set_rdev(buf.st_rdev);
+        response->set_size(buf.st_size);
+        response->set_blksize(buf.st_blksize);
+        response->set_blocks(buf.st_blocks);
+
+        response->set_asec(buf.st_atim.tv_sec);
+        response->set_anano(buf.st_atim.tv_nsec);
+        response->set_msec(buf.st_atim.tv_sec);
+        response->set_mnano(buf.st_mtim.tv_nsec);
+        response->set_csec(buf.st_ctim.tv_sec);
+        response->set_cnano(buf.st_ctim.tv_nsec);
+
+        if(debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            std::cout << "RPC_getattr " << path << " size:" << buf.st_size << " elapsed:" << elapsed << std::endl;
+        }
+
+        return Status::OK;
+    }
+
+
+    Status RPC_access(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = access(path.c_str(), request->value1());
+        return generate_response("RPC_access", path, ret, response, start);
+    }
+
+    Status RPC_mknod(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = mknod(path.c_str(), request->value1(), request->value2());
+        return generate_response("RPC_mknod", path, ret, response, start);
+    }
+
+    Status RPC_mkdir(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root + "/filesystem" + request->path1();
+        int ret = mkdir(path.c_str(), request->value1());
+        return generate_response("RPC_mkdir", path, ret, response, start);
+    }
+
+    Status RPC_unlink(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = unlink(path.c_str());
+        return generate_response("RPC_unlink", path, ret, response, start);
+    }
+
+    Status RPC_rmdir(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = rmdir(path.c_str());
+        return generate_response("RPC_rmdir", path, ret, response, start);
+    }
+
+
+    // sends the requested file to client
     Status RPC_sendfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
+        uint64_t start = raw_time();
         std::string path = root+request->path1();
         size_t size = 0;
-        uint64_t start = raw_time();
+
 
         int fd = open(path.c_str(), O_RDONLY);
         if (fd == -1) {
@@ -135,11 +268,210 @@ class GreeterServiceImpl final : public Greeter::Service {
             print_debug("RPC_sendfile--close", path, close_result);
         }
 
-        if( debug_flag) {
+        if(debug_flag) {
             uint64_t elapsed = raw_time() - start;
             std::cout << "RPC_sendfile " << path << " size:" << size << " elapsed:" << elapsed << std::endl;
         }
 
+        return Status::OK;
+    }
+
+    // sends all the filenames in the speciffied dir
+    Status RPC_readdir(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+
+        DIR *dp = opendir(path.c_str());
+        if (dp == NULL) {
+            print_debug("RPC_readdir--opendir", path, 0);
+            Data data = Data();
+            data.set_result(errno ? errno : EINVAL);
+            writer->Write(data);
+            return Status::OK;
+        }
+
+        int entries = 0;
+        struct dirent *de;
+        while ((de = readdir(dp)) != NULL) {
+            Data data = Data();
+            data.set_result(0);
+            data.set_data(std::string(de->d_name));
+            writer->Write(data);
+            entries++;
+        }
+
+        int result = closedir(dp);
+        if(result) {
+            print_debug("RPC_readdir--closedir", path, result);
+        }
+
+        if(debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            std::cout << "RPC_readdir " << path << " entries:" << entries << " elapsed:" << elapsed << std::endl;
+        }
+
+        return Status::OK;
+    }
+
+
+    std::string get_random_name() {
+        int fd = open("/dev/random", O_RDONLY);
+        if (fd == -1) {
+            print_debug("get_random_name--open", "/dev/random", fd);
+            return std::string("");
+        }
+        char buffer[17];
+        for (int i = 0; i < 16; i++) {
+            char ch;
+            int ret = read(fd, &ch, 1);
+            if (ret == -1) {
+                close(fd);
+                print_debug("get_random_name--read", "/dev/random",ret);
+                return std::string("");
+            }
+            buffer[i] = 'a' + ch % 26;
+        }
+        close(fd);
+        buffer[16] = 0;
+        return std::string(buffer);
+    }
+
+    Status RPC_receivefile(ServerContext* context, ServerReader<ReceiveFileRequest>* reader, ReceiveFileResponse* response) override {
+        uint64_t start = raw_time();
+
+        size_t size = 0;
+
+        // get a temporary file name to land the file while we receive data
+        std::string temp = get_random_name();
+        if(temp.length()==0) {
+            print_debug("RPC_receivefile--get_random_name", temp, 0);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+        // set temp to the full path in our filesystem.
+        temp = root+"/staging/"+get_random_name();
+
+        int fd = open(temp.c_str(), O_WRONLY);
+        if (fd == -1) {
+            print_debug("RPC_receivefile--open", temp, fd);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+        bool isFirst = true;
+        std::string filename;
+        uint64_t expected_size;
+        uint32_t mode;
+        uint32_t uid;
+        uint32_t gid ;
+
+        ReceiveFileRequest data;
+        while (reader->Read(&data)) {
+            if(isFirst) {
+                filename = std::string(data.filename());
+                expected_size = data.size();
+                mode = data.mode();
+                uid = data.uid();
+                gid = data.gid();
+                isFirst = false;
+            }
+
+            std::string bytes = data.data();
+            int len = bytes.length();
+            size += len;
+            int ret = write(fd, bytes.c_str(), len);
+            if (ret != len) {
+                // got an error
+                close(fd);
+                unlink(temp.c_str());
+                print_debug("RPC_receivefile--write", temp, fd);
+                response->set_result(errno ? errno : EINVAL);
+                return Status::OK;
+            }
+        }
+
+        // WTF? we did not get anything from the stream
+        if(isFirst) {
+            print_debug("RPC_receivefile--close", filename, 0);
+            response->set_result(EINVAL);
+            return Status::OK;
+        }
+
+        int result = close(fd);
+        if(result) {
+            unlink(temp.c_str());
+            print_debug("RPC_receivefile--close", temp, result);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+        // make sure we wrote the same number of bytes that the client asked us to write
+        if(size != expected_size) {
+            unlink(temp.c_str());
+            print_debug("RPC_receivefile--wrong size received", temp, result);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+        // set the permissions to whatever the client has requested
+        result = chmod(temp.c_str(), mode);
+        if (result < 0) {
+            unlink(temp.c_str());
+            print_debug("RPC_receivefile--chmod", temp, result);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+        // set the file ownership to whatever the client requested
+        result = chown(temp.c_str(), uid, gid);
+        if (result < 0) {
+            unlink(temp.c_str());
+            print_debug("RPC_receivefile--chown", temp, result);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+
+//        struct timespec ts[2];
+//        ts[0].tv_sec
+//
+//        printf("ts[0] %ld.%09ld\n", ts[0].tv_sec, ts[0].tv_nsec);
+//        printf("ts[1] %ld.%09ld\n", ts[1].tv_sec, ts[1].tv_nsec);
+//
+//        int ret = utimensat(AT_FDCWD, path, ts, AT_SYMLINK_NOFOLLOW);
+//        if (ret == -1) {
+//            printf("utimensat failed errno:%d\n", errno);
+//            return -errno;
+//        }
+
+        // get the full path name for the file in our local file system
+        std::string newpath = root +"/filesystem" + filename;
+        std::cout << "newpath:" << newpath << newpath << std::endl;
+
+        result = rename(temp.c_str(), newpath.c_str());
+        if (result < 0) {
+            unlink(temp.c_str());
+            print_debug("RPC_receivefile--rename", temp, result);
+            response->set_result(errno ? errno : EINVAL);
+            return Status::OK;
+        }
+
+//        struct stat buf;
+//        memset(&buf, 0, sizeof(struct stat));
+//        result = lstat(newpath.c_str(), &buf);
+//        if (result < 0) {
+//            print_debug("RPC_receivefile--lstat", newpath, result);
+//            response->set_result(errno ? errno : EINVAL);
+//            return Status::OK;
+//        }
+
+        if( debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            std::cout << "RPC_receivefile " << filename << " size:" << size << " elapsed:" << elapsed << std::endl;
+        }
+
+        response->set_result(0);
         return Status::OK;
     }
 };

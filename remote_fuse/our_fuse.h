@@ -6,22 +6,23 @@
 void *rpc_init(struct fuse_conn_info *conn);
 void rpc_destroy(void *private_data);
 
-int rpc_statfs(const char *path, struct statvfs *);
-int rpc_lstat(const char *path, struct stat *buf);
-int rpc_getattr(const char *path, struct stat *buf);
 
-int rpc_access(const char *, int);
+int rpc_statfs(const char *path, struct statvfs *);
+int rpc_lstat(const char *path, struct stat *statbuf);
+
+int rpc_utimens(const char *path, const struct timespec ts[2]);
+int rpc_getattr(const char *path, struct stat *);
 int rpc_mknod(const char *path, mode_t, dev_t);
 int rpc_mkdir(const char *path, mode_t);
 int rpc_unlink(const char *path);
 int rpc_rmdir(const char *path);
-
+int rpc_symlink(const char *path, const char *);
 int rpc_rename(const char *path, const char *);
 int rpc_chmod(const char *path, mode_t);
 int rpc_truncate(const char *path, off_t);
-int rpc_utimens(const char *path, const struct timespec ts[2]);
 
 
+int rpc_access(const char *, int);
 int rpc_open(const char *, struct fuse_file_info *);
 int rpc_create(const char *, mode_t, struct fuse_file_info *);
 int rpc_release(const char *, struct fuse_file_info *);
@@ -51,7 +52,6 @@ int rpc_fsyncdir(const char *, int, struct fuse_file_info *);
 // the project requirements say that we can ignore links.
 // we can also ignore security, so we don't care about uid/gid.
 int rpc_readlink(const char *, char *, size_t);
-int rpc_symlink(const char *path, const char *);
 int rpc_link(const char *, const char *);
 int rpc_chown(const char *, uid_t, gid_t);
 
