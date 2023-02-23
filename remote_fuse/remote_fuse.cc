@@ -213,6 +213,117 @@ public:
         return respond("rmdir", path, status, response.result());
     }
 
+    int readlink(const std::string& path, char* buffer, int bufsiz) {
+        CommonRequest request;
+        request.set_path1(path);
+
+        Data response;
+        ClientContext context;
+        Status status = stub_->RPC_readlink(&context, request, &response);
+
+        if (! status.ok()) {
+            if (debug_flag) {
+                std::cout << "readlink path: [" << path << "] rpc not ok -- " << status.error_code() << ": " << status.error_message() << std::endl;
+            }
+            errno = EINVAL;
+            return -1;
+        }
+
+        int result = response.result();
+        if(result < 0) {
+            if (debug_flag) {
+                std::cout << "readlink path: [" << path << "] response.result() -- " << response.result() << std::endl;
+            }
+            errno = -result;
+            return -1;
+        }
+
+        if(result > bufsiz) result = bufsiz;
+        strncpy(buffer, response.data().c_str(), result);
+        return result;
+    }
+
+    int symlink(const std::string& target, const std::string& linkpath) {
+        CommonRequest request;
+        request.set_path1(target);
+        request.set_path2(linkpath);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_symlink(&context, request, &response);
+        return respond("symlink", target, status, response.result());
+    }
+
+    int rename(const std::string& oldname, const std::string& newname) {
+        CommonRequest request;
+        request.set_path1(oldname);
+        request.set_path2(newname);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_rename(&context, request, &response);
+        return respond("rename", oldname, status, response.result());
+    }
+
+    int link(const std::string& oldname, const std::string& newname) {
+        CommonRequest request;
+        request.set_path1(oldname);
+        request.set_path2(newname);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_link(&context, request, &response);
+        return respond("link", oldname, status, response.result());
+    }
+
+    int chmod(const std::string& path, mode_t mode) {
+        CommonRequest request;
+        request.set_path1(path);
+        request.set_value1(mode);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_chmod(&context, request, &response);
+        return respond("chmod", path, status, response.result());
+    }
+
+    int chown(const std::string& path, int uid, int gid) {
+        CommonRequest request;
+        request.set_path1(path);
+        request.set_value1(uid);
+        request.set_value2(gid);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_chown(&context, request, &response);
+        return respond("chown", path, status, response.result());
+    }
+
+    int truncate(const std::string& path, off_t offset) {
+        CommonRequest request;
+        request.set_path1(path);
+        request.set_value1(offset);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_truncate(&context, request, &response);
+        return respond("chown", path, status, response.result());
+    }
+
+    int utimens(const std::string& path, const struct timespec* ts) {
+        CommonRequest request;
+        request.set_path1(path);
+        request.set_value1(ts[0].tv_sec);
+        request.set_value1(ts[0].tv_nsec);
+        request.set_value1(ts[1].tv_sec);
+        request.set_value1(ts[1].tv_nsec);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_utimens(&context, request, &response);
+        return respond("chown", path, status, response.result());
+    }
+
 
 
     int receive_file(const std::string& path, int dest_fd, size_t* size) {
@@ -373,6 +484,38 @@ extern "C" int rpc_rmdir(const char *path) {
 }
 
 
+extern "C" int rpc_readlink(const char *path, char *buf, size_t bufsiz) {
+    return greeterPtr->readlink(path, buf, bufsiz);
+}
+
+extern "C" int rpc_symlink(const char *target, const char *linkpath) {
+    return greeterPtr->symlink(target, linkpath);
+}
+
+extern "C" int rpc_rename(const char *oldpath, const char *newpath) {
+    return greeterPtr->rename(oldpath, newpath);
+}
+
+extern "C" int rpc_link(const char *oldpath, const char *newpath) {
+    return greeterPtr->link(oldpath, newpath);
+}
+
+extern "C" int rpc_chmod(const char *path, mode_t mode) {
+    return greeterPtr->chmod(path, mode);
+}
+
+extern "C" int rpc_chown(const char *path, uid_t owner, gid_t group) {
+    return greeterPtr->chown(path, owner, group);
+}
+
+extern "C" int rpc_truncate(const char *path, off_t length) {
+    // TODO we probably need to truncate the local file as well (if there is one)
+    return greeterPtr->truncate(path, length);
+}
+
+extern "C" int rpc_utimens(const char *path, const struct timespec ts[2]) {
+    return greeterPtr->utimens(path, ts);
+}
 
 
 //
@@ -401,78 +544,6 @@ extern "C" int rpc_receive_file(const char *path, int fd, size_t* size) {
     return greeterPtr->receive_file(path, fd, size);
 }
 
-
-extern "C" int rpc_readlink(const char *path, char *buf, size_t bufsiz)
-{
-    int ret = readlink(path, buf, bufsiz);
-    if (ret == -1) {
-        return -errno;
-    }
-    buf[ret] = 0;
-
-    return 0;
-}
-
-
-extern "C" int rpc_symlink(const char *target, const char *linkpath)
-{
-    int ret = symlink(target, linkpath);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
-}
-
-extern "C" int rpc_rename(const char *oldpath, const char *newpath)
-{
-    int ret = rename(oldpath, newpath);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
-}
-
-extern "C" int rpc_link(const char *oldpath, const char *newpath)
-{
-    int ret = link(oldpath, newpath);
-    if (ret < 0) {
-        return -errno;
-    }
-
-    return 0;
-}
-
-extern "C" int rpc_chmod(const char *path, mode_t mode)
-{
-    int ret = chmod(path, mode);
-    if (ret < 0) {
-        return -errno;
-    }
-
-    return 0;
-}
-
-extern "C" int rpc_chown(const char *path, uid_t owner, gid_t group)
-{
-    int ret = chown(path, owner, group);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
-}
-
-extern "C" int rpc_truncate(const char *path, off_t length)
-{
-    int ret = truncate(path, length);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
-}
 
 extern "C" int rpc_open(const char *path, struct fuse_file_info *fi)
 {
@@ -649,16 +720,6 @@ extern "C" int rpc_fallocate(const char *path, int mode, off_t offset, off_t len
     return 0;
 }
 
-extern "C" int rpc_utimens(const char *path, const struct timespec ts[2])
-{
-    /* don't use utime/utimes since they follow symlinks */
-    int ret = utimensat(0, path, ts, AT_SYMLINK_NOFOLLOW);
-    if (ret == -1) {
-        return -errno;
-    }
-
-    return 0;
-}
 
 // ----------------- directory opperations (we do not support them) -----------------
 

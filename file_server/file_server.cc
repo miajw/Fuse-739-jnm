@@ -222,6 +222,92 @@ class GreeterServiceImpl final : public Greeter::Service {
         return generate_response("RPC_rmdir", path, ret, response, start);
     }
 
+    Status RPC_readlink(ServerContext* context, const CommonRequest* request, Data* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+
+        char buffer[4096];
+        int ret = readlink(path.c_str(), buffer, sizeof(buffer));
+        if(ret < 0) {
+            response->set_result(ret ? errno : 0);
+        } else {
+            response->set_result(0);
+            response->set_data(std::string(buffer, ret));
+        }
+
+        if(debug_flag) {
+            uint64_t elapsed = raw_time() - start;
+            if(ret) {
+                std::cout << "RPC_readlink path: [" << path << "] ret:" << ret << " errno:" << errno << " " << strerror(errno) << " elapsed:" << elapsed << std::endl;
+            } else {
+                std::cout << "RPC_readlink path: [" << path << "] OK" << " elapsed:" << elapsed << std::endl;
+            }
+        }
+
+        return Status::OK;
+    }
+
+    Status RPC_symlink(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string target = root+"/filesystem"+request->path1();
+        std::string linkpath = request->path2();
+        int ret = symlink(target.c_str(), linkpath.c_str());
+        return generate_response("RPC_symlink", linkpath, ret, response, start);
+    }
+
+    Status RPC_rename(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string oldname = root+"/filesystem"+request->path1();
+        std::string newname = root+"/filesystem"+request->path2();
+        int ret = rename(oldname.c_str(), newname.c_str());
+        return generate_response("RPC_rename", oldname, ret, response, start);
+    }
+
+    Status RPC_link(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string oldname = root+"/filesystem"+request->path1();
+        std::string newname = root+"/filesystem"+request->path2();
+        int ret = link(oldname.c_str(), newname.c_str());
+        return generate_response("RPC_link", oldname, ret, response, start);
+    }
+
+    Status RPC_chmod(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = chmod(path.c_str(), request->value1());
+        return generate_response("RPC_chmod", path, ret, response, start);
+    }
+
+    Status RPC_chown(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = chown(path.c_str(), request->value1(), request->value2());
+        return generate_response("RPC_chown", path, ret, response, start);
+    }
+
+    Status RPC_truncate(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        int ret = truncate(path.c_str(), request->value1());
+        return generate_response("RPC_truncate", path, ret, response, start);
+    }
+
+    Status RPC_utimens(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root+"/filesystem"+request->path1();
+        struct timespec ts[2];
+        ts[0].tv_sec = request->value1();
+        ts[0].tv_nsec = request->value2();
+        ts[1].tv_sec = request->value3();
+        ts[1].tv_nsec = request->value4();
+        int ret = utimensat(AT_FDCWD, path.c_str(), ts, AT_SYMLINK_NOFOLLOW);
+        return generate_response("RPC_utimens", path, ret, response, start);
+    }
+
+
+
+
+
 
     // sends the requested file to client
     Status RPC_sendfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
