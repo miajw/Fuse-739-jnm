@@ -208,6 +208,13 @@ class GreeterServiceImpl final : public Greeter::Service {
         return generate_response("RPC_mkdir", path, ret, response, start);
     }
 
+    Status RPC_create(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
+        uint64_t start = raw_time();
+        std::string path = root + "/filesystem" + request->path1();
+        int ret = open(path.c_str(), O_WRONLY | O_CREAT, request->value1());
+        return generate_response("RPC_create", path, ret, response, start);
+    }
+
     Status RPC_unlink(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
         uint64_t start = raw_time();
         std::string path = root+"/filesystem"+request->path1();
@@ -312,7 +319,7 @@ class GreeterServiceImpl final : public Greeter::Service {
     // sends the requested file to client
     Status RPC_sendfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
         uint64_t start = raw_time();
-        std::string path = root+request->path1();
+        std::string path = root+"/filesystem"+request->path1();
         size_t size = 0;
 
 
@@ -438,7 +445,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         // set temp to the full path in our filesystem.
         temp = root+"/staging/"+get_random_name();
 
-        int fd = open(temp.c_str(), O_WRONLY);
+        int fd = open(temp.c_str(), O_WRONLY | O_CREAT);
         if (fd == -1) {
             print_debug("RPC_receivefile--open", temp, fd);
             response->set_result(errno ? errno : EINVAL);
@@ -451,9 +458,10 @@ class GreeterServiceImpl final : public Greeter::Service {
         uint32_t mode;
         uint32_t uid;
         uint32_t gid ;
-
+        print_debug("0", temp, fd);
         ReceiveFileRequest data;
         while (reader->Read(&data)) {
+            print_debug("a", temp, fd);
             if(isFirst) {
                 filename = std::string(data.filename());
                 expected_size = data.size();
@@ -462,11 +470,12 @@ class GreeterServiceImpl final : public Greeter::Service {
                 gid = data.gid();
                 isFirst = false;
             }
-
+            print_debug("b", temp, fd);
             std::string bytes = data.data();
             int len = bytes.length();
             size += len;
             int ret = write(fd, bytes.c_str(), len);
+            print_debug("c", temp, fd);
             if (ret != len) {
                 // got an error
                 close(fd);
@@ -475,8 +484,9 @@ class GreeterServiceImpl final : public Greeter::Service {
                 response->set_result(errno ? errno : EINVAL);
                 return Status::OK;
             }
+            print_debug("d", temp, fd);
         }
-
+        print_debug("1", temp, fd);
         // WTF? we did not get anything from the stream
         if(isFirst) {
             print_debug("RPC_receivefile--close", filename, 0);

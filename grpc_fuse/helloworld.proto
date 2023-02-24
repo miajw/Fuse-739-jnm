@@ -21,6 +21,7 @@ service Greeter {
   rpc RPC_mkdir (CommonRequest) returns (CommonResponse) {}
   rpc RPC_unlink (CommonRequest) returns (CommonResponse) {}
   rpc RPC_rmdir (CommonRequest) returns (CommonResponse) {}
+  rpc RPC_create (CommonRequest) returns (CommonResponse) {}
 
   rpc RPC_readlink (CommonRequest) returns (Data) {}
   rpc RPC_symlink (CommonRequest) returns (CommonResponse) {}

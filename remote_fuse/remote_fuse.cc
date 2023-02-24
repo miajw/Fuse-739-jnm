@@ -12,6 +12,7 @@
 
 #include <sys/ioctl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/xattr.h>
 
 #define _XOPEN_SOURCE 700
@@ -28,6 +29,7 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 using grpc::ClientReader;
+using grpc::ClientWriter;
 
 
 using helloworld::Greeter;
@@ -36,6 +38,8 @@ using helloworld::HelloRequest;
 using helloworld::CommonRequest;
 using helloworld::CommonResponse;
 using helloworld::Data;
+using helloworld::ReceiveFileRequest;
+using helloworld::ReceiveFileResponse;
 using helloworld::TimeSpec;
 using helloworld::StatStruct;
 using helloworld::StatvfsStruct;
@@ -193,6 +197,18 @@ public:
         return respond("mkdir", path, status, response.result());
     }
 
+    int create(const std::string& path, mode_t mode) {
+        fprintf(stderr, "starting create\n");
+        CommonRequest request;
+        request.set_path1(path);
+        request.set_value1(mode);
+
+        CommonResponse response;
+        ClientContext context;
+        Status status = stub_->RPC_create(&context, request, &response);
+        return respond("create", path, status, response.result());
+    }
+
     int unlink(const std::string& path) {
         CommonRequest request;
         request.set_path1(path);
@@ -326,12 +342,11 @@ public:
 
 
 
-    int receive_file(const std::string& path, int dest_fd, size_t* size) {
+    int receive_file(const std::string& path, int dest_fd) {
         if(debug_flag) {
             std::cout << "starting receive_file " << path << " dest_fd:" << dest_fd << std::endl;
         }
 
-        *size = 0;
         int err = 0;
         CommonRequest request;
         request.set_path1(path);
@@ -351,7 +366,6 @@ public:
                 err = errno;
                 break;
             }
-            *size += len;
         }
 
         Status status = reader->Finish();
@@ -359,35 +373,68 @@ public:
     }
 
 
-    int send_file(const std::string& path, int dest_fd, size_t* size) {
-        if(debug_flag) {
-            std::cout << "starting send_file " << path << " dest_fd:" << dest_fd << std::endl;
+    int send_file(const std::string& path, int fd) {
+        if (debug_flag) {
+            std::cout << "starting send_file " << path << " src_fd:" << fd << std::endl;
         }
 
-        *size = 0;
         int err = 0;
-        CommonRequest request;
-        request.set_path1(path);
 
         ClientContext context;
-        Data data;
-        std::unique_ptr<ClientReader<Data>> reader(stub_->RPC_sendfile(&context, request));
-        while (reader->Read(&data)) {
-            if(data.result() != 0) {
-                err = data.result();
-                break;
-            }
+        ReceiveFileResponse response;
+        std::unique_ptr<ClientWriter<ReceiveFileRequest>> writer(stub_->RPC_receivefile(&context, &response));
+        size_t size = 0;
 
-            int len = data.data().length();
-            int ret = write(dest_fd, data.data().c_str(), len);
-            if(ret!=len){
-                err = errno;
-                break;
-            }
-            *size += len;
+        if (fd == -1) {
+            print_debug("send_file--open", path, fd);
+            ReceiveFileRequest request = ReceiveFileRequest();
+            writer->Write(request);
+            Status status = writer->Finish();
+            return respond("receive_file", path, status, err);
         }
 
-        Status status = reader->Finish();
+        struct stat statbuf;
+        if (stat(path.c_str(), &statbuf) == -1) {
+            print_debug("send_file--stat", path, fd);
+            ReceiveFileRequest request = ReceiveFileRequest();
+            writer->Write(request);
+            Status status = writer->Finish();
+            return respond("receive_file", path, status, err);
+        }
+
+        char buffer[65536];
+
+        while (1) {
+            int ret = read(fd, buffer, sizeof(buffer));
+            if (ret < 0) {
+                // got an error
+                print_debug("send_file--read", path, fd);
+                ReceiveFileRequest request = ReceiveFileRequest();
+                writer->Write(request);
+                break;
+            } else if (ret == 0) {
+                // end of file reached
+                break;
+            } else {
+                // we got data
+                size += ret;
+                ReceiveFileRequest request = ReceiveFileRequest();
+                request.set_filename(path);
+                request.set_size(statbuf.st_size);
+                request.set_mode(statbuf.st_mode);
+                request.set_uid(statbuf.st_uid);
+                request.set_gid(statbuf.st_gid);
+                request.set_data(std::string(buffer, ret));
+                writer->Write(request);
+            }
+        }
+
+        int close_result = close(fd);
+        if (close_result) {
+            print_debug("send_file--close", path, close_result);
+        }
+
+        Status status = writer->Finish();
         return respond("receive_file", path, status, err);
     }
 
@@ -541,22 +588,29 @@ extern "C" int rpc_utimens(const char *path, const struct timespec ts[2]) {
 //}
 
 extern "C" int rpc_receive_file(const char *path, int fd, size_t* size) {
-    return greeterPtr->receive_file(path, fd, size);
+    return greeterPtr->receive_file(path, fd);
 }
 
-
-extern "C" int rpc_open(const char *path, struct fuse_file_info *fi)
+extern "C" int rpc_open(const char* path, struct fuse_file_info* fi) 
 {
-    int ret = open(path, fi->flags);
-    if (ret == -1) {
+    int fd;
+    (void) fi;
+
+    if (fi == NULL) {
+        fd = open(path, O_WRONLY);
+    } else {
+        fd = fi->fh;
+    }
+
+    if (fd == -1) {
         return -errno;
     }
-    fi->fh = ret;
 
-    return 0;
+    return greeterPtr->receive_file(path, fd);
 }
 
-extern "C" extern "C" int rpc_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+extern "C" int rpc_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) 
+{
     std::string result = greeterPtr->SayHello(path);
     const char* data = result.c_str();
     memcpy( buffer, data + offset, size );
@@ -589,7 +643,7 @@ extern "C" int rpc_write(const char *path, const char *buf, size_t size, off_t o
     return ret;
 }
 
-extern "C" int rpc_flush(const char *path, struct fuse_file_info *fi)
+extern "C" int rpc_flush(const char* path, struct fuse_file_info* fi)
 {
     int ret = close(dup(fi->fh));
     if (ret == -1) {
@@ -599,14 +653,22 @@ extern "C" int rpc_flush(const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
-extern "C" int rpc_release(const char *path, struct fuse_file_info *fi)
+extern "C" int rpc_release(const char* path, struct fuse_file_info* fi)
 {
-    int ret = close(fi->fh);
-    if (ret == -1) {
+    int fd;
+    (void) fi;
+
+    if(fi == NULL) {
+        fd = open(path, O_WRONLY);
+    } else {
+        fd = fi->fh;
+    }
+
+    if (fd == -1) {
         return -errno;
     }
 
-    return 0;
+    return greeterPtr->send_file(path, fd);
 }
 
 extern "C" int rpc_fsync(const char *path, int datasync, struct fuse_file_info *fi)
@@ -628,15 +690,8 @@ extern "C" int rpc_fsync(const char *path, int datasync, struct fuse_file_info *
     return 0;
 }
 
-extern "C" int rpc_create(const char *path, mode_t mode, struct fuse_file_info *fi)
-{
-    int ret = open(path, fi->flags, mode);
-    if (ret == -1) {
-        return -errno;
-    }
-    fi->fh = ret;
-
-    return 0;
+extern "C" int rpc_create(const char *path, mode_t mode, struct fuse_file_info* fi) {
+    return greeterPtr->create(path, mode);
 }
 
 extern "C" int rpc_ftruncate(const char *path, off_t length, struct fuse_file_info *fi)
@@ -721,7 +776,7 @@ extern "C" int rpc_fallocate(const char *path, int mode, off_t offset, off_t len
 }
 
 
-// ----------------- directory opperations (we do not support them) -----------------
+// ----------------- directory operations (we do not support them) -----------------
 
 extern "C" int rpc_opendir(const char *path, struct fuse_file_info *fi) {
     vector<string> filenames;

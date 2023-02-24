@@ -21,6 +21,7 @@ int rpc_rename(const char *path, const char *);
 int rpc_chmod(const char *path, mode_t);
 int rpc_truncate(const char *path, off_t);
 
+int rpc_receive_file(const char*, int, size_t*);
 
 int rpc_access(const char *, int);
 int rpc_open(const char *, struct fuse_file_info *);
