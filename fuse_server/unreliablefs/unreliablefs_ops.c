@@ -71,38 +71,38 @@ const char *fuse_op_name[] = {
     "lstat"
 };
 
-extern int debug_flag;
+extern int debug_level;
 
 extern int error_inject(const char* path, fuse_op operation);
 
 void debug_cmd(const char * cmd) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s\n", cmd);
 }
 
 void debug_path(const char * cmd, const char * path) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s: [%s]\n", cmd, path);
 }
 
 void debug_two_paths(const char * cmd, const char * path1, const char * path2) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s: [%s] [%s]\n", cmd, path1, path2);
 }
 
 void debug_path_int(const char * cmd, const char * path, uint64_t value) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s: [%s] %ld(%lu) 0x%lx 0%lo\n", cmd, path, value, value, value, value);
 }
 
 void debug_path_two_ints(const char * cmd, const char * path, uint64_t value1, uint64_t value2) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s: [%s] %lu(%ld) 0x%lx 0%lo -- %lu(%ld) 0x%lx 0%lo\n",
            cmd, path, value1, value1, value1, value1, value2, value2, value2, value2);
 }
 
 void debug_path_three_ints(const char * cmd, const char * path, uint64_t value1, uint64_t value2, uint64_t value3) {
-    if(!debug_flag) return;
+    if(debug_level<3) return;
     printf("%s: [%s] %lu(%ld) 0x%lx 0%lo -- %lu, %lu\n", cmd, path, value1, value1, value1, value1, value2, value3);
 }
 
@@ -583,7 +583,7 @@ int unreliable_fallocate(const char *path, int mode, off_t offset, off_t len, st
         return ret;
     }
 
-    fprintf(stderr, "fallocate() not implemented path[%s], mode:%d offset:%lu len:%lu\n", path, mode, offset, len);
+    if (debug_level>1) printf( "fallocate() not implemented path[%s], mode:%d offset:%lu len:%lu\n", path, mode, offset, len);
     return EINVAL;
 }
 

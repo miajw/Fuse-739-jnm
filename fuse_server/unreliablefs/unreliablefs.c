@@ -18,12 +18,9 @@ extern void config_delete(struct err_inj_q *config);
 
 struct unreliablefs_config conf;
 
-// flag to indicate whether we should print a bunch of debug stuff.
-int debug_flag = 0;
-
-// flag to indicate whether we should print errors
-int print_errors = 1;
-
+extern int debug_level;
+extern char* remote_server;
+extern char* cache_path;
 
 static struct fuse_operations unreliable_ops = {
     .getattr     = unreliable_getattr,
@@ -138,6 +135,31 @@ int is_dir(const char *path) {
 
 int main(int argc, char *argv[])
 {
+    // the fuse developers have a wierd way of dealing with arguments, instead of try to figure this all
+    // out, we will put our arguments first and then remove our argument from the list passed to fuse_main.
+
+    if(argc<5) {
+        printf("usage: %s <remote_server> <cache_dir> <debug_level> [fuse_main args] <mount_dir>\n", argv[0]);
+        printf("<remote_server> should be something like 10.1.2.3:55001\n");
+        printf("<cache_dir> is a directory on the local host to cache remote files.\n");
+        printf("<debug_level> should be an integer 0-5 (0 is silent) (5 is verbose)\n");
+        printf("[fuse_main args] <mount_dir> are the stuff passed to fuse_main\n");
+        exit(1);
+    }
+
+    remote_server = strdup(argv[1]);
+    cache_path = strdup(argv[2]);
+    debug_level = atoi(argv[3]);
+
+    if(cache_path[strlen(cache_path)-1] != '/') {
+        printf("the cache_dir [%s] should end with a slash\n", cache_path);
+        exit(1);
+    }
+
+    // shift the argvs and fix up argc
+    for(int i=4; i<argc ; i++) argv[i-3] = argv[i];
+    argc -= 3;
+
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     memset(&conf, 0, sizeof(conf));
     conf.seed = time(0);

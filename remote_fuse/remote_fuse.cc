@@ -44,10 +44,10 @@ using helloworld::WritebackResponse;
 using helloworld::StatStruct;
 using helloworld::StatvfsStruct;
 
-extern int debug_flag;
-extern int print_errors;
-
-char* cache_path = (char*) "/home/ubuntu/fuse_cache/";
+// arguments from the command line
+int debug_level;
+char* remote_server;
+char* cache_path;
 
 void set_value(uint8_t value, int offset, char* buffer) {
     if(value<10) {
@@ -104,29 +104,26 @@ public:
         if (status.ok()) {
             return reply.message();
         } else {
-            std::cout << status.error_code() << ": " << status.error_message()
-                      << std::endl;
+            std::cout << status.error_code() << ": " << status.error_message() << std::endl;
             return "RPC failed";
         }
     }
 
     void print_error(const std::string &cmd, const std::string &msg, const std::string &path, int result) {
+        if(debug_level<1) return;
         std::cout << cmd << " " << msg << " path: [" << path << "] result:" << result
-        << " errno:" << errno
-        << " " << strerror(errno) << std::endl;
+            << " errno:" << errno
+            << " " << strerror(errno) << std::endl;
     }
 
 
     void print_debug(const std::string &cmd, const std::string &path, int ret) {
         if (ret) {
-            if(print_errors) {
-                std::cout << cmd << " path: [" << path << "] errno:" << errno << " " << strerror(errno) << std::endl;
-            }
-            if (debug_flag) {
+            if (debug_level>2 ) {
                 std::cout << cmd << " path: [" << path << "] errno:" << errno << " " << strerror(errno) << std::endl;
             }
         } else {
-            if (debug_flag) {
+            if (debug_level>2 ) {
                 std::cout << cmd << " path: [" << path << "] OK" << std::endl;
             }
         }
@@ -138,7 +135,7 @@ public:
             print_debug(cmd, path, ret);
             return ret ? -1 : 0;
         } else {
-            if (debug_flag || print_errors) {
+            if (debug_level>2) {
                 std::cout << cmd << " path: [" << path << "] rpc not ok -- " << status.error_code() << ": "
                           << status.error_message() << std::endl;
             }
@@ -204,7 +201,7 @@ public:
 
         // no such file is common when getting file attributes
         // we won't consider this case an error and will just return
-        if(status.ok() && ret == 2 && debug_flag==0) {
+        if(status.ok() && ret == 2 && debug_level<2) {
             errno = 2;
             return -1;
         }
@@ -288,7 +285,7 @@ public:
         Status status = stub_->RPC_readlink(&context, request, &response);
 
         if (! status.ok()) {
-            if (debug_flag) {
+            if (debug_level>2 ) {
                 std::cout << "readlink path: [" << path << "] rpc not ok -- " << status.error_code() << ": " << status.error_message() << std::endl;
             }
             errno = EINVAL;
@@ -297,7 +294,7 @@ public:
 
         int result = response.result();
         if(result < 0) {
-            if (debug_flag) {
+            if (debug_level>2 ) {
                 std::cout << "readlink path: [" << path << "] response.result() -- " << response.result() << std::endl;
             }
             errno = -result;
@@ -391,7 +388,7 @@ public:
     }
 
     int remote_read_dir(const std::string& path, vector<string>* filenames) {
-        if(debug_flag) {
+        if(debug_level>2 ) {
             std::cout << "starting read_dir " << path << std::endl;
         }
 
@@ -442,13 +439,13 @@ public:
         struct stat remote_stat;
         int rret = remote_getattr(path, &remote_stat);
         if(rret != 0) {
-            printf("getattr failed -- path:%s rret:%d\n", path.c_str(), rret);
+            if(debug_level>0) printf("getattr failed -- path:%s rret:%d\n", path.c_str(), rret);
             return rret; // try again
         }
 
         int dest_fd = open(hash_path, O_CREAT | O_TRUNC | O_WRONLY);
         if(dest_fd < 0) return dest_fd;
-        printf("opened file %s fd:%d\n", hash_path, dest_fd);
+        if(debug_level>0) printf("opened file %s fd:%d\n", hash_path, dest_fd);
 
         CommonRequest request;
         request.set_path1(path);
@@ -475,13 +472,13 @@ public:
         // clean up
         Status status = reader->Finish();
         if(!status.ok()) {
-            printf("finish screwed up\n");
+            if(debug_level>0) printf("finish screwed up\n");
             return -2;
         }
 
         int result = close(dest_fd);
         if(result) {
-            printf("close screwed up\n");
+            if(debug_level>0) printf("close screwed up\n");
             return -2;
         }
 
@@ -489,33 +486,33 @@ public:
         struct stat remote_stat2;
         rret = remote_getattr(path, &remote_stat2);
         if(rret != 0) {
-            printf("file changed while downloading path:%s rret:%d\n", path.c_str(), rret);
+            if(debug_level>1) printf("file changed while downloading path:%s rret:%d\n", path.c_str(), rret);
             return -2; // try again
+        }
+
+        if(debug_level>4) printf("chmod to %o\n", remote_stat2.st_mode);
+
+        // set the permissions to whatever the client has requested
+        result = chmod(hash_path, remote_stat2.st_mode);
+        if (result < 0) {
+            if(debug_level>0) printf("do_fetch_file--chmod %s %d\n", hash_path, result);
+            return -2;
+        }
+
+        if(debug_level>3) printf("chown to uid%d gid:%d\n", remote_stat2.st_uid, remote_stat2.st_gid);
+
+        // set the file ownership to whatever the client requested
+        result = chown(hash_path, remote_stat2.st_uid, remote_stat2.st_gid);
+        if (result < 0) {
+            if(debug_level>0) printf("do_fetch_file--chmod %s %d\n", hash_path, result);
+            return -2;
         }
 
         if (remote_stat2.st_size != remote_stat.st_size ||
             remote_stat2.st_mtim.tv_sec != remote_stat.st_mtim.tv_sec ||
             remote_stat2.st_mtim.tv_nsec != remote_stat.st_mtim.tv_nsec) {
-            printf("file changed while downloading:%s\n", path.c_str());
+            if(debug_level>1) printf("file changed while downloading:%s\n", path.c_str());
             return -2;  // try again
-        }
-
-        printf("chmod to %o\n", remote_stat2.st_mode);
-
-        // set the permissions to whatever the client has requested
-        result = chmod(hash_path, remote_stat2.st_mode);
-        if (result < 0) {
-            printf("do_fetch_file--chmod %s %d\n", hash_path, result);
-            return -2;
-        }
-
-        printf("chown to uid%d gid:%d\n", remote_stat2.st_uid, remote_stat2.st_gid);
-
-        // set the file ownership to whatever the client requested
-        result = chown(hash_path, remote_stat2.st_uid, remote_stat2.st_gid);
-        if (result < 0) {
-            printf("do_fetch_file--chmod %s %d\n", hash_path, result);
-            return -2;
         }
 
         struct timespec ts[2];
@@ -526,12 +523,12 @@ public:
 
         result = utimensat(AT_FDCWD, hash_path, ts, AT_SYMLINK_NOFOLLOW);
         if (result == -1) {
-            printf("do_fetch_file--utimensat failed errno:%d\n", errno);
+            if(debug_level>0) printf("do_fetch_file--utimensat failed errno:%d\n", errno);
             return -2;
         }
 
          // the file changed while downloading
-        printf("do_fetch_file file downloaded path:%s\n", path.c_str());
+        if(debug_level>2) printf("do_fetch_file file downloaded path:%s\n", path.c_str());
         return 0;
     }
 
@@ -540,7 +537,7 @@ public:
         int attempts = 0;
         while (attempts < 10) {
             if(cached_copy_usable(path, hash_path)) {
-                printf("cached file is reeusable - YAY!\n");
+                if(debug_level>2) printf("cached file is reeusable - YAY!\n");
                 return 0;
             }
 
@@ -549,7 +546,7 @@ public:
             attempts++;
         }
 
-        printf("%d attempts to fetch file: %s\n", attempts, path.c_str());
+        if(debug_level>0) printf("%d attempts to fetch file: %s\n", attempts, path.c_str());
         errno = EAGAIN;
         return -1;
     }
@@ -560,9 +557,7 @@ public:
         char hash_path[256];
         hash_name((const unsigned char*)path.c_str(), hash_path);
 
-        if (debug_flag) {
-            printf("starting writeback path:%s, hash_path:%s\n", path.c_str(), hash_path);
-        }
+        if (debug_level>2 ) printf("starting writeback path:%s, hash_path:%s\n", path.c_str(), hash_path);
 
         struct stat buf;
         memset(&buf, 0, sizeof(struct stat));
@@ -580,7 +575,7 @@ public:
         request.set_uid(buf.st_uid);
         request.set_gid(buf.st_gid);
 
-        if(debug_flag) {
+        if(debug_level>2 ) {
             std::cout << "path:" << path
                     << " st_size:" << buf.st_size
                     << " st_mode:" << buf.st_mode
@@ -620,7 +615,7 @@ public:
                 writer->Write(request);
             }
         }
-        
+
         int close_result = close(fd);
         if (close_result) {
             std::string msg = "close fd:"+std::to_string(fd)+" offset:"+std::to_string(size);
@@ -648,11 +643,14 @@ static GreeterClient* greeterPtr;
 // ---------------------- our client setup / teardown stuff ----------------------
 
 extern "C" void *rpc_init(struct fuse_conn_info *conn) {
-    if(debug_flag) printf("initializing RPC\n");
-    std::string target_str = "localhost:50051";
+    printf("debug_level:%d\n", debug_level);
+    if(debug_level>2 ) printf("initializing RPC remote server:%s\n", remote_server);
+
+    std::string target_str = std::string(remote_server);
     greeterPtr = new GreeterClient(grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+
     std::string result = greeterPtr->SayHello("speedy");
-    if(debug_flag) printf("called server -- result:%s\n", result.c_str());
+    if(debug_level>4 ) printf("called server -- result:%s\n", result.c_str());
     return NULL;
 }
 
@@ -739,24 +737,22 @@ extern "C" int rpc_utimens(const char *path, const struct timespec ts[2]) {
 extern "C" int rpc_open(const char *path, struct fuse_file_info *fi)
 {
     if(fi->flags & O_CREAT) {
-        printf("************** rpc_open with O_CREAT  path:%s flags:%d\n", path, fi->flags);
+        if (debug_level>2 ) printf("************** rpc_open with O_CREAT  path:%s flags:%d\n", path, fi->flags);
     }
 
     char hash_path[256];
     hash_name((const unsigned char*)path, hash_path);
-    printf("rpc_open hash_path: [%s]\n", hash_path);
+    if (debug_level>2 ) printf("rpc_open hash_path: [%s]\n", hash_path);
 
     int result = greeterPtr->fetchfile(path, hash_path);
     if (result < 0) {
-        printf("rpc_open path:%s errno:%d strerror:%s\n", path, errno, strerror(errno));
+        if (debug_level>0) printf("rpc_open path:%s errno:%d strerror:%s\n", path, errno, strerror(errno));
         return result;
     }
 
-    printf("rpc_open fetched the file\n");
-
     int ret = open(hash_path, O_RDWR);
     if(ret < 0) {
-        printf("rpc_open path:%s hash_path:%s flags:%d errno:%d strerror:%s\n", path, hash_path, fi->flags, errno, strerror(errno));
+        if (debug_level>0) printf("rpc_open path:%s hash_path:%s flags:%d errno:%d strerror:%s\n", path, hash_path, fi->flags, errno, strerror(errno));
         return ret;
     }
 
@@ -799,7 +795,10 @@ extern "C" int rpc_write(const char *path, const char *buf, size_t size, off_t o
 
 extern "C" int rpc_flush(const char* path, struct fuse_file_info* fi)
 {
-    int ret = close(dup(fi->fh));
+    int ret = greeterPtr->writeback(std::string(path));
+    if(ret != 0) return -1;
+
+    ret = close(dup(fi->fh));
     if (ret == -1) {
         return -errno;
     }
