@@ -427,14 +427,13 @@ public:
                 writer->Write(request);
             }
         }
-
-        writer->Finish();
         
         int close_result = close(fd);
         if (close_result) {
             print_debug("writeback--close", path, close_result);
         }
 
+        writer->WritesDone();
         Status status = writer->Finish();
         return respond("writeback", path, status, 0);
     }
