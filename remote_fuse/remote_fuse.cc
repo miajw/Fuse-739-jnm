@@ -14,6 +14,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
+#include <openssl/sha.h>
 
 #define _XOPEN_SOURCE 700
 #define ERRNO_NOOP -999
@@ -44,6 +45,39 @@ using helloworld::StatStruct;
 using helloworld::StatvfsStruct;
 
 extern int debug_flag;
+extern int print_errors;
+
+char* cache_path = (char*) "/home/ubuntu/fuse_cache/";
+
+void set_value(uint8_t value, int offset, char* buffer) {
+    if(value<10) {
+        buffer[offset] = '0' + value;
+    } else {
+        buffer[offset] = 'a' + value - 10;
+    }
+}
+
+void to_hex(uint8_t value, int offset, char* buffer) {
+    uint8_t hi = (value >> 4) & 0xf;
+    uint8_t lo = value & 0xf;
+    set_value(hi, offset, buffer);
+    set_value(lo, offset+1, buffer);
+}
+
+void hash_name(const unsigned char* in, char* result) {
+    unsigned char hash[SHA_DIGEST_LENGTH]; // == 20
+    int len = strlen((const char *)in);
+    SHA1(in, len, hash);
+
+    strcpy(result, cache_path);
+    int offset = strlen(cache_path);
+    // this is a really cheesy way to create the filename but ...
+    for(int i=0; i<20; i++) {
+        to_hex(hash[i], offset+i*2, result);
+    }
+    result[offset+40] = 0;
+}
+
 
 class GreeterClient {
 public:
@@ -76,8 +110,18 @@ public:
         }
     }
 
+    void print_error(const std::string &cmd, const std::string &msg, const std::string &path, int result) {
+        std::cout << cmd << " " << msg << " path: [" << path << "] result:" << result
+        << " errno:" << errno
+        << " " << strerror(errno) << std::endl;
+    }
+
+
     void print_debug(const std::string &cmd, const std::string &path, int ret) {
         if (ret) {
+            if(print_errors) {
+                std::cout << cmd << " path: [" << path << "] errno:" << errno << " " << strerror(errno) << std::endl;
+            }
             if (debug_flag) {
                 std::cout << cmd << " path: [" << path << "] errno:" << errno << " " << strerror(errno) << std::endl;
             }
@@ -94,7 +138,7 @@ public:
             print_debug(cmd, path, ret);
             return ret ? -1 : 0;
         } else {
-            if (debug_flag) {
+            if (debug_flag || print_errors) {
                 std::cout << cmd << " path: [" << path << "] rpc not ok -- " << status.error_code() << ": "
                           << status.error_message() << std::endl;
             }
@@ -102,7 +146,7 @@ public:
         }
     }
 
-    int getstatvfs(const  std::string& path, struct statvfs *buf) {
+    int remote_getstatvfs(const  std::string& path, struct statvfs *buf) {
         CommonRequest request;
         request.set_path1(path);
 
@@ -128,7 +172,7 @@ public:
         return respond("getstatvfs", path, status, response.result());
     }
 
-    int getattr(const std::string &path, struct stat *buf) {
+    int remote_getattr(const std::string &path, struct stat *buf) {
         CommonRequest request;
         request.set_path1(path);
 
@@ -156,10 +200,19 @@ public:
             buf->st_ctim.tv_nsec = response.cnano();
         }
 
-        return respond("getattr", path, status, response.result());
+        int ret = response.result();
+
+        // no such file is common when getting file attributes
+        // we won't consider this case an error and will just return
+        if(status.ok() && ret == 2 && debug_flag==0) {
+            errno = 2;
+            return -1;
+        }
+
+        return respond("getattr", path, status, ret);
     }
 
-    int access(const std::string& path, int mode) {
+    int remote_access(const std::string& path, int mode) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(mode);
@@ -171,7 +224,7 @@ public:
     }
 
 
-    int mknod(const std::string& path, mode_t mode, dev_t dev) {
+    int remote_mknod(const std::string& path, mode_t mode, dev_t dev) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(mode);
@@ -184,8 +237,7 @@ public:
     }
 
 
-    int mkdir(const std::string& path, mode_t mode) {
-        fprintf(stderr, "starting mkdir\n");
+    int remote_mkdir(const std::string& path, mode_t mode) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(mode);
@@ -196,8 +248,7 @@ public:
         return respond("mkdir", path, status, response.result());
     }
 
-    int create(const std::string& path, mode_t mode) {
-        fprintf(stderr, "starting create\n");
+    int remote_create(const std::string& path, mode_t mode) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(mode);
@@ -208,7 +259,7 @@ public:
         return respond("create", path, status, response.result());
     }
 
-    int unlink(const std::string& path) {
+    int remote_unlink(const std::string& path) {
         CommonRequest request;
         request.set_path1(path);
 
@@ -218,7 +269,7 @@ public:
         return respond("unlink", path, status, response.result());
     }
 
-    int rmdir(const std::string& path) {
+    int remote_rmdir(const std::string& path) {
         CommonRequest request;
         request.set_path1(path);
 
@@ -228,7 +279,7 @@ public:
         return respond("rmdir", path, status, response.result());
     }
 
-    int readlink(const std::string& path, char* buffer, int bufsiz) {
+    int remote_readlink(const std::string& path, char* buffer, int bufsiz) {
         CommonRequest request;
         request.set_path1(path);
 
@@ -258,7 +309,7 @@ public:
         return result;
     }
 
-    int symlink(const std::string& target, const std::string& linkpath) {
+    int remote_symlink(const std::string& target, const std::string& linkpath) {
         CommonRequest request;
         request.set_path1(target);
         request.set_path2(linkpath);
@@ -269,7 +320,7 @@ public:
         return respond("symlink", target, status, response.result());
     }
 
-    int rename(const std::string& oldname, const std::string& newname) {
+    int remote_rename(const std::string& oldname, const std::string& newname) {
         CommonRequest request;
         request.set_path1(oldname);
         request.set_path2(newname);
@@ -280,7 +331,7 @@ public:
         return respond("rename", oldname, status, response.result());
     }
 
-    int link(const std::string& oldname, const std::string& newname) {
+    int remote_link(const std::string& oldname, const std::string& newname) {
         CommonRequest request;
         request.set_path1(oldname);
         request.set_path2(newname);
@@ -291,7 +342,7 @@ public:
         return respond("link", oldname, status, response.result());
     }
 
-    int chmod(const std::string& path, mode_t mode) {
+    int remote_chmod(const std::string& path, mode_t mode) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(mode);
@@ -302,7 +353,7 @@ public:
         return respond("chmod", path, status, response.result());
     }
 
-    int chown(const std::string& path, int uid, int gid) {
+    int remote_chown(const std::string& path, int uid, int gid) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(uid);
@@ -314,7 +365,7 @@ public:
         return respond("chown", path, status, response.result());
     }
 
-    int truncate(const std::string& path, off_t offset) {
+    int remote_truncate(const std::string& path, off_t offset) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(offset);
@@ -325,7 +376,7 @@ public:
         return respond("chown", path, status, response.result());
     }
 
-    int utimens(const std::string& path, const struct timespec* ts) {
+    int remote_utimens(const std::string& path, const struct timespec* ts) {
         CommonRequest request;
         request.set_path1(path);
         request.set_value1(ts[0].tv_sec);
@@ -339,106 +390,7 @@ public:
         return respond("chown", path, status, response.result());
     }
 
-
-
-    int fetchfile(const std::string& path, int dest_fd) {
-        if(debug_flag) {
-            std::cout << "starting receive_file " << path << " dest_fd:" << dest_fd << std::endl;
-        }
-
-        int err = 0;
-        CommonRequest request;
-        request.set_path1(path);
-
-        ClientContext context;
-        Data data;
-        std::unique_ptr<ClientReader<Data>> reader(stub_->RPC_fetchfile(&context, request));
-        while (reader->Read(&data)) {
-            if(data.result() != 0) {
-                err = data.result();
-                break;
-            }
-
-            int len = data.data().length();
-            int ret = write(dest_fd, data.data().c_str(), len);
-            if(ret!=len){
-                err = errno;
-                break;
-            }
-        }
-
-        Status status = reader->Finish();
-        return respond("receive_file", path, status, err);
-    }
-
-
-    int writeback(const std::string& path, int fd) {
-        if (debug_flag) {
-            std::cout << "starting writeback " << path << " src_fd:" << fd << std::endl;
-        }
-
-        struct stat buf;
-        memset(&buf, 0, sizeof(struct stat));
-        int retval = fstat(fd, &buf);
-        if(retval < 0) {
-            if(debug_flag) {
-                std::cout << "writeback path:" << path << "fstat error -- errno:" << errno << std::endl;
-            }
-            return -1;
-        }
-
-        WritebackRequest request;
-        request.set_filename(path);
-        request.set_size(buf.st_size);
-        request.set_mode(buf.st_mode);
-        request.set_uid(buf.st_uid);
-        request.set_gid(buf.st_gid);
-
-        if(debug_flag) {
-            std::cout << "path:" << path
-                    << " st_size:" << buf.st_size
-                    << " st_mode:" << buf.st_mode
-                    << " st_uid:" << buf.st_uid
-                    << " st_gid:" << buf.st_gid << std::endl;
-        }
-
-        ClientContext context;
-        WritebackResponse response;
-        std::unique_ptr<ClientWriter<WritebackRequest>> writer(stub_->RPC_writeback(&context, &response));
-        size_t size = 0;
-
-        char buffer[65536];
-        while (1) {
-            int ret = pread(fd, buffer, sizeof(buffer), size);
-            if (ret < 0) {
-                // got an error
-                print_debug("writeback--read", path, fd);
-                WritebackRequest request = WritebackRequest();
-                writer->Write(request);
-                break;
-            } else if (ret == 0) {
-                // end of file reached
-                break;
-            } else {
-                // we got data
-                size += ret;
-                request.set_data(std::string(buffer, ret));
-                print_debug("writeback--write data", path, size);
-                writer->Write(request);
-            }
-        }
-        
-        int close_result = close(fd);
-        if (close_result) {
-            print_debug("writeback--close", path, close_result);
-        }
-
-        writer->WritesDone();
-        Status status = writer->Finish();
-        return respond("writeback", path, status, 0);
-    }
-
-    int read_dir(const std::string& path, vector<string>* filenames) {
+    int remote_read_dir(const std::string& path, vector<string>* filenames) {
         if(debug_flag) {
             std::cout << "starting read_dir " << path << std::endl;
         }
@@ -461,6 +413,225 @@ public:
         Status status = reader->Finish();
         return respond("read_dir", path, status, err);
     }
+
+    int cached_copy_usable(const std::string& path, char* hash_path) {
+        struct stat local_stat;
+        memset(&local_stat, 0, sizeof(struct stat));
+        int result = lstat(hash_path, &local_stat);
+        if(result == 2) {
+            // no such file or directory
+            unlink(hash_path);
+            return 1;
+        }
+        if(result != 0) return 0;
+
+        struct stat remote_stat;
+        result = remote_getattr(path, &remote_stat);
+        if(result != 0)  return 0;
+
+        if (local_stat.st_size != remote_stat.st_size) return 0;
+        if (local_stat.st_mtim.tv_sec == remote_stat.st_mtim.tv_sec ) return 0;
+        if (local_stat.st_mtim.tv_nsec == remote_stat.st_mtim.tv_nsec) return 0;
+
+        return 1;
+    }
+
+
+    int do_fetch_file(const std::string& path, char* hash_path) {
+
+        struct stat remote_stat;
+        int rret = remote_getattr(path, &remote_stat);
+        if(rret != 0) {
+            printf("getattr failed -- path:%s rret:%d\n", path.c_str(), rret);
+            return rret; // try again
+        }
+
+        int dest_fd = open(hash_path, O_CREAT | O_TRUNC | O_WRONLY);
+        if(dest_fd < 0) return dest_fd;
+        printf("opened file %s fd:%d\n", hash_path, dest_fd);
+
+        CommonRequest request;
+        request.set_path1(path);
+
+        size_t size = 0;
+        ClientContext context;
+        Data data;
+        std::unique_ptr<ClientReader<Data>> reader(stub_->RPC_fetchfile(&context, request));
+        while (reader->Read(&data)) {
+            if(data.result() != 0) {
+                break;
+            }
+
+            int len = data.data().length();
+            int ret = pwrite(dest_fd, data.data().c_str(), len, size);
+            if(ret!=len){
+                std::string msg = "write fd:"+std::to_string(dest_fd)+" offset:"+std::to_string(size)+" len:"+std::to_string(len);
+                print_error("fetchfile", msg, path, ret);
+                break;
+            }
+            size = size + len;
+        }
+
+        // clean up
+        Status status = reader->Finish();
+        if(!status.ok()) {
+            printf("finish screwed up\n");
+            return -2;
+        }
+
+        int result = close(dest_fd);
+        if(result) {
+            printf("close screwed up\n");
+            return -2;
+        }
+
+        // make sure the file did not change on the server while we downloaded.
+        struct stat remote_stat2;
+        rret = remote_getattr(path, &remote_stat2);
+        if(rret != 0) {
+            printf("file changed while downloading path:%s rret:%d\n", path.c_str(), rret);
+            return -2; // try again
+        }
+
+        if (remote_stat2.st_size != remote_stat.st_size ||
+            remote_stat2.st_mtim.tv_sec != remote_stat.st_mtim.tv_sec ||
+            remote_stat2.st_mtim.tv_nsec != remote_stat.st_mtim.tv_nsec) {
+            printf("file changed while downloading:%s\n", path.c_str());
+            return -2;  // try again
+        }
+
+        printf("chmod to %o\n", remote_stat2.st_mode);
+
+        // set the permissions to whatever the client has requested
+        result = chmod(hash_path, remote_stat2.st_mode);
+        if (result < 0) {
+            printf("do_fetch_file--chmod %s %d\n", hash_path, result);
+            return -2;
+        }
+
+        printf("chown to uid%d gid:%d\n", remote_stat2.st_uid, remote_stat2.st_gid);
+
+        // set the file ownership to whatever the client requested
+        result = chown(hash_path, remote_stat2.st_uid, remote_stat2.st_gid);
+        if (result < 0) {
+            printf("do_fetch_file--chmod %s %d\n", hash_path, result);
+            return -2;
+        }
+
+        struct timespec ts[2];
+        ts[0].tv_sec = remote_stat2.st_atim.tv_sec;
+        ts[0].tv_nsec = remote_stat2.st_atim.tv_nsec;
+        ts[1].tv_sec = remote_stat2.st_mtim.tv_sec;
+        ts[1].tv_nsec = remote_stat2.st_mtim.tv_nsec;
+
+        result = utimensat(AT_FDCWD, hash_path, ts, AT_SYMLINK_NOFOLLOW);
+        if (result == -1) {
+            printf("do_fetch_file--utimensat failed errno:%d\n", errno);
+            return -2;
+        }
+
+         // the file changed while downloading
+        printf("do_fetch_file file downloaded path:%s\n", path.c_str());
+        return 0;
+    }
+
+    int fetchfile(const std::string& path, char* hash_path) {
+
+        int attempts = 0;
+        while (attempts < 10) {
+            if(cached_copy_usable(path, hash_path)) {
+                printf("cached file is reeusable - YAY!\n");
+                return 0;
+            }
+
+            int result = do_fetch_file(path, hash_path);
+            if (result != -2) return result;
+            attempts++;
+        }
+
+        printf("%d attempts to fetch file: %s\n", attempts, path.c_str());
+        errno = EAGAIN;
+        return -1;
+    }
+
+
+
+    int writeback(const std::string& path) {
+        char hash_path[256];
+        hash_name((const unsigned char*)path.c_str(), hash_path);
+
+        if (debug_flag) {
+            printf("starting writeback path:%s, hash_path:%s\n", path.c_str(), hash_path);
+        }
+
+        struct stat buf;
+        memset(&buf, 0, sizeof(struct stat));
+        int retval = lstat(hash_path, &buf);
+        if(retval < 0) {
+            std::string msg = "lstat hash_path:"+std::string(hash_path);
+            print_error("writeback", msg, path, retval);
+            return -1;
+        }
+
+        WritebackRequest request;
+        request.set_filename(path);
+        request.set_size(buf.st_size);
+        request.set_mode(buf.st_mode);
+        request.set_uid(buf.st_uid);
+        request.set_gid(buf.st_gid);
+
+        if(debug_flag) {
+            std::cout << "path:" << path
+                    << " st_size:" << buf.st_size
+                    << " st_mode:" << buf.st_mode
+                    << " st_uid:" << buf.st_uid
+                    << " st_gid:" << buf.st_gid << std::endl;
+        }
+
+        int fd = open(hash_path, O_RDONLY);
+        if(fd < 0) {
+            std::string msg = "open hash_path:"+std::string(hash_path);
+            print_error("writeback", msg, path, retval);
+            return -1;
+        }
+
+        ClientContext context;
+        WritebackResponse response;
+        std::unique_ptr<ClientWriter<WritebackRequest>> writer(stub_->RPC_writeback(&context, &response));
+        size_t size = 0;
+
+        char buffer[65536];
+        while (1) {
+            int ret = pread(fd, buffer, sizeof(buffer), size);
+            if (ret < 0) {
+                // got an error
+                std::string msg = "pread fd:"+std::to_string(fd)+" offset:"+std::to_string(size);
+                print_error("writeback", msg, path, retval);
+                WritebackRequest request = WritebackRequest();
+                writer->Write(request);
+                break;
+            } else if (ret == 0) {
+                // end of file reached
+                break;
+            } else {
+                // we got data
+                size += ret;
+                request.set_data(std::string(buffer, ret));
+                writer->Write(request);
+            }
+        }
+        
+        int close_result = close(fd);
+        if (close_result) {
+            std::string msg = "close fd:"+std::to_string(fd)+" offset:"+std::to_string(size);
+            print_error("writeback", msg, path, retval);
+        }
+
+        writer->WritesDone();
+        Status status = writer->Finish();
+        return respond("writeback", path, status, 0);
+    }
+
 
 
 
@@ -494,15 +665,15 @@ extern "C" void rpc_destroy(void *private_data) {
 
 
 extern "C" int rpc_statfs(const char *path, struct statvfs *buf) {
-    return greeterPtr->getstatvfs(path, buf);
+    return greeterPtr->remote_getstatvfs(path, buf);
 }
 
 extern "C" int rpc_lstat(const char *path, struct stat *buf) {
-    return greeterPtr->getattr(path, buf);
+    return greeterPtr->remote_getattr(path, buf);
 }
 
 extern "C" int rpc_getattr(const char *path, struct stat *buf) {
-    int result = greeterPtr->getattr(path, buf);
+    int result = greeterPtr->remote_getattr(path, buf);
     return result ? -errno : 0;
 }
 
@@ -511,98 +682,93 @@ extern "C" int rpc_getattr(const char *path, struct stat *buf) {
 // ---------------------- stuff for manipulating files and the filesystem ----------------------
 
 extern "C" int rpc_access(const char *path, mode_t mode) {
-    return greeterPtr->access(path, mode);
+    return greeterPtr->remote_access(path, mode);
 }
 
 extern "C" int rpc_mknod(const char *path, mode_t mode, dev_t dev) {
-    return greeterPtr->mknod(path, mode, dev);
+    return greeterPtr->remote_mknod(path, mode, dev);
 }
 
 extern "C" int rpc_mkdir(const char *path, mode_t mode) {
-    return greeterPtr->mkdir(path, mode);
+    return greeterPtr->remote_mkdir(path, mode);
 }
 
 extern "C" int rpc_unlink(const char *path) {
-    return greeterPtr->unlink(path);
+    return greeterPtr->remote_unlink(path);
 }
 
 extern "C" int rpc_rmdir(const char *path) {
-    return greeterPtr->rmdir(path);
+    return greeterPtr->remote_rmdir(path);
 }
 
 
 extern "C" int rpc_readlink(const char *path, char *buf, size_t bufsiz) {
-    return greeterPtr->readlink(path, buf, bufsiz);
+    return greeterPtr->remote_readlink(path, buf, bufsiz);
 }
 
 extern "C" int rpc_symlink(const char *target, const char *linkpath) {
-    return greeterPtr->symlink(target, linkpath);
+    return greeterPtr->remote_symlink(target, linkpath);
 }
 
 extern "C" int rpc_rename(const char *oldpath, const char *newpath) {
-    return greeterPtr->rename(oldpath, newpath);
+    return greeterPtr->remote_rename(oldpath, newpath);
 }
 
 extern "C" int rpc_link(const char *oldpath, const char *newpath) {
-    return greeterPtr->link(oldpath, newpath);
+    return greeterPtr->remote_link(oldpath, newpath);
 }
 
 extern "C" int rpc_chmod(const char *path, mode_t mode) {
-    return greeterPtr->chmod(path, mode);
+    return greeterPtr->remote_chmod(path, mode);
 }
 
 extern "C" int rpc_chown(const char *path, uid_t owner, gid_t group) {
-    return greeterPtr->chown(path, owner, group);
+    return greeterPtr->remote_chown(path, owner, group);
 }
 
 extern "C" int rpc_truncate(const char *path, off_t length) {
     // TODO we probably need to truncate the local file as well (if there is one)
-    return greeterPtr->truncate(path, length);
+    return greeterPtr->remote_truncate(path, length);
 }
 
 extern "C" int rpc_utimens(const char *path, const struct timespec ts[2]) {
-    return greeterPtr->utimens(path, ts);
+    return greeterPtr->remote_utimens(path, ts);
 }
-
-
-//
-//public int read_file(const char *path, StreamObserver<Data> responseObserver) {) {
-//    int fd = open(path, O_RDONLY);
-//    if (fd == -1) {
-//        Data ;
-//        return;
-//    }
-//
-//    while (1) {
-//        int ret = read(fd, buf, sizeof(buf));
-//        if (ret < 0) {
-//            // error occured
-//        } else if (ret == 0) {
-//            // end of file reached
-//        } else {
-//            // we got data
-//        }
-//    }
-//
-//    close(fd);
-//}
 
 
 extern "C" int rpc_open(const char *path, struct fuse_file_info *fi)
 {
-    FILE* tmp = tmpfile();
-    if (tmp == NULL) {
-        return -1;
+    if(fi->flags & O_CREAT) {
+        printf("************** rpc_open with O_CREAT  path:%s flags:%d\n", path, fi->flags);
     }
-    fi->fh = tmp->_fileno;
 
-    return greeterPtr->fetchfile(path, fi->fh);
+    char hash_path[256];
+    hash_name((const unsigned char*)path, hash_path);
+    printf("rpc_open hash_path: [%s]\n", hash_path);
+
+    int result = greeterPtr->fetchfile(path, hash_path);
+    if (result < 0) {
+        printf("rpc_open path:%s errno:%d strerror:%s\n", path, errno, strerror(errno));
+        return result;
+    }
+
+    printf("rpc_open fetched the file\n");
+
+    int ret = open(hash_path, O_RDWR);
+    if(ret < 0) {
+        printf("rpc_open path:%s hash_path:%s flags:%d errno:%d strerror:%s\n", path, hash_path, fi->flags, errno, strerror(errno));
+        return ret;
+    }
+
+    fi->fh = ret;
+
+    return 0;
 }
 
 
 extern "C" int rpc_release(const char *path, struct fuse_file_info *fi) {
 
-    int ret = greeterPtr->writeback(path, fi->fh);
+    int ret = greeterPtr->writeback(path);
 
     close(fi->fh);
     fi->fh = -1;
@@ -661,14 +827,14 @@ extern "C" int rpc_fsync(const char *path, int datasync, struct fuse_file_info *
 }
 
 extern "C" int rpc_create(const char *path, mode_t mode, struct fuse_file_info* fi) {
-     int ret = greeterPtr->create(path, mode);
+     int ret = greeterPtr->remote_create(path, mode);
      if(ret != 0) return ret;
      return rpc_open(path, fi);
 }
 
 extern "C" int rpc_ftruncate(const char *path, off_t length, struct fuse_file_info *fi)
 {
-    int ret = truncate(path, length);
+    int ret = greeterPtr->remote_truncate(path, length);
     if (ret == -1) {
         return -errno;
     }
@@ -752,7 +918,7 @@ extern "C" int rpc_fallocate(const char *path, int mode, off_t offset, off_t len
 
 extern "C" int rpc_opendir(const char *path, struct fuse_file_info *fi) {
     vector<string> filenames;
-    int result = greeterPtr->read_dir(path, &filenames);
+    int result = greeterPtr->remote_read_dir(path, &filenames);
     if(result) {
         errno = - result;
         return -1;
@@ -762,7 +928,7 @@ extern "C" int rpc_opendir(const char *path, struct fuse_file_info *fi) {
 
 extern "C" int rpc_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
     vector<string> filenames;
-    int result = greeterPtr->read_dir(path, &filenames);
+    int result = greeterPtr->remote_read_dir(path, &filenames);
     if(result) {
         errno = - result;
         return -1;

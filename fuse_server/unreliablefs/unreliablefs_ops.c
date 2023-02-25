@@ -161,8 +161,6 @@ int unreliable_mknod(const char *path, mode_t mode, dev_t dev) {
 }
 
 int unreliable_mkdir(const char *path, mode_t mode) {
-    fprintf(stderr, "******* in unreliable_mkdir  %s\n", path);
-
     debug_path_int("mkdir", path, mode);
 
     int ret = error_inject(path, OP_MKDIR);

@@ -19,7 +19,11 @@ extern void config_delete(struct err_inj_q *config);
 struct unreliablefs_config conf;
 
 // flag to indicate whether we should print a bunch of debug stuff.
-int debug_flag = 1;
+int debug_flag = 0;
+
+// flag to indicate whether we should print errors
+int print_errors = 1;
+
 
 static struct fuse_operations unreliable_ops = {
     .getattr     = unreliable_getattr,

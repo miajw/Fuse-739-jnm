@@ -77,7 +77,7 @@ uint64_t raw_time() {
 
 
 std::string root = "";
-int debug_flag = 0;
+int debug_flag = 1;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -472,11 +472,9 @@ class GreeterServiceImpl final : public Greeter::Service {
         uint32_t mode;
         uint32_t uid;
         uint32_t gid ;
-        print_debug("0", temp, fd);
 
         WritebackRequest data;
         while (reader->Read(&data)) {
-            print_debug("a", temp, fd);
             if(isFirst) {
                 filename = std::string(data.filename());
                 expected_size = data.size();
@@ -485,12 +483,12 @@ class GreeterServiceImpl final : public Greeter::Service {
                 gid = data.gid();
                 isFirst = false;
             }
-            print_debug("b", temp, fd);
+
             std::string bytes = data.data();
             int len = bytes.length();
             size += len;
             int ret = write(fd, bytes.c_str(), len);
-            print_debug("c", temp, fd);
+
             if (ret != len) {
                 // got an error
                 close(fd);
@@ -499,10 +497,8 @@ class GreeterServiceImpl final : public Greeter::Service {
                 response->set_result(errno ? errno : EINVAL);
                 return Status::OK;
             }
-            print_debug("d", temp, fd);
         }
 
-        print_debug("1", temp, fd);
         // WTF? we did not get anything from the stream
         if(isFirst) {
             print_debug("RPC_writeback--close", filename, 0);
@@ -559,7 +555,10 @@ class GreeterServiceImpl final : public Greeter::Service {
 
         // get the full path name for the file in our local file system
         std::string newpath = root +"/filesystem" + filename;
-        std::cout << "newpath:" << newpath << newpath << std::endl;
+
+        if(debug_flag) {
+            std::cout << "RPC_writeback--rename old:" << temp << " new:" << newpath << std::endl;
+        }
 
         result = rename(temp.c_str(), newpath.c_str());
         if (result < 0) {
@@ -568,6 +567,8 @@ class GreeterServiceImpl final : public Greeter::Service {
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
+
+
 
 //        struct stat buf;
 //        memset(&buf, 0, sizeof(struct stat));
@@ -580,7 +581,7 @@ class GreeterServiceImpl final : public Greeter::Service {
 
         if( debug_flag) {
             uint64_t elapsed = raw_time() - start;
-            std::cout << "RPC_writeback " << filename << " size:" << size << " elapsed:" << elapsed << std::endl;
+            std::cout << "RPC_writeback " << filename << " OK size:" << size << " elapsed:" << elapsed << std::endl;
         }
 
         response->set_result(0);
