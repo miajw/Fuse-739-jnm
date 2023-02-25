@@ -10,7 +10,3 @@ target_link_libraries(remote_fuse
         ${_PROTOBUF_LIBPROTOBUF})
 
 target_include_directories(remote_fuse PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-
-add_executable(receive_file "receive_file.c")
-target_compile_options(receive_file PUBLIC -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(receive_file remote_fuse)

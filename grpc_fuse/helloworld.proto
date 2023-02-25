@@ -32,8 +32,8 @@ service Greeter {
   rpc RPC_truncate (CommonRequest) returns (CommonResponse) {}
   rpc RPC_utimens (CommonRequest) returns (CommonResponse) {}
 
-  rpc RPC_sendfile(CommonRequest)  returns(stream Data) {}
-  rpc RPC_receivefile(stream ReceiveFileRequest)  returns(ReceiveFileResponse) {}
+  rpc RPC_fetchfile(CommonRequest)  returns(stream Data) {}
+  rpc RPC_writeback(stream WritebackRequest)  returns(WritebackResponse) {}
 
   rpc RPC_readdir(CommonRequest)  returns(stream Data) {}
 }
@@ -66,7 +66,7 @@ message Data {
     bytes data = 2;
 }
 
-message ReceiveFileRequest {
+message WritebackRequest {
     string filename = 1;
     uint64 size = 2;
     uint32 mode = 3;
@@ -75,14 +75,8 @@ message ReceiveFileRequest {
     bytes data = 6;
 }
 
-message ReceiveFileResponse {
+message WritebackResponse {
     int32  result = 1;
-    TimeSpec modified = 2;
-}
-
-message TimeSpec {
-    uint64 seconds = 1;
-    uint32 nanos = 2;
 }
 
 message StatStruct {

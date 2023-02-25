@@ -59,10 +59,9 @@ using helloworld::HelloReply;
 using helloworld::HelloRequest;
 using helloworld::CommonRequest;
 using helloworld::CommonResponse;
-using helloworld::ReceiveFileRequest;
-using helloworld::ReceiveFileResponse;
+using helloworld::WritebackRequest;
+using helloworld::WritebackResponse;
 using helloworld::Data;
-using helloworld::TimeSpec;
 using helloworld::StatStruct;
 using helloworld::StatvfsStruct;
 
@@ -211,8 +210,20 @@ class GreeterServiceImpl final : public Greeter::Service {
     Status RPC_create(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
         uint64_t start = raw_time();
         std::string path = root + "/filesystem" + request->path1();
-        int ret = open(path.c_str(), O_WRONLY | O_CREAT, request->value1());
-        return generate_response("RPC_create", path, ret, response, start);
+        int mode = request->value1();
+        int ret = creat(path.c_str(), mode);
+        if(ret == -1) {
+            return generate_response("RPC_create", path, ret, response, start);
+        }
+
+        ret = close(ret);
+        if(ret < 0) {
+            if(debug_flag) {
+                std::cout << "RPC_create--close() path:" << path << " mode:" << mode << " errno:" + errno << std::endl;
+            }
+        }
+
+        return generate_response("RPC_create", path, 0, response, start);
     }
 
     Status RPC_unlink(ServerContext* context, const CommonRequest* request, CommonResponse* response) override {
@@ -317,7 +328,7 @@ class GreeterServiceImpl final : public Greeter::Service {
 
 
     // sends the requested file to client
-    Status RPC_sendfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
+    Status RPC_fetchfile(ServerContext* context, const CommonRequest* request, ServerWriter<Data>* writer) override {
         uint64_t start = raw_time();
         std::string path = root+"/filesystem"+request->path1();
         size_t size = 0;
@@ -325,7 +336,7 @@ class GreeterServiceImpl final : public Greeter::Service {
 
         int fd = open(path.c_str(), O_RDONLY);
         if (fd == -1) {
-            print_debug("RPC_sendfile--open", path, fd);
+            print_debug("RPC_fetchfile--open", path, fd);
             Data data = Data();
             data.set_result(errno);
             writer->Write(data);
@@ -338,7 +349,7 @@ class GreeterServiceImpl final : public Greeter::Service {
             int ret = read(fd, buffer, sizeof(buffer));
             if (ret < 0) {
                 // got an error
-                print_debug("RPC_sendfile--read", path, fd);
+                print_debug("RPC_fetchfile--read", path, fd);
                 Data data = Data();
                 data.set_result(errno);
                 writer->Write(data);
@@ -358,12 +369,12 @@ class GreeterServiceImpl final : public Greeter::Service {
 
         int close_result = close(fd);
         if(close_result) {
-            print_debug("RPC_sendfile--close", path, close_result);
+            print_debug("RPC_fetchfile--close", path, close_result);
         }
 
         if(debug_flag) {
             uint64_t elapsed = raw_time() - start;
-            std::cout << "RPC_sendfile " << path << " size:" << size << " elapsed:" << elapsed << std::endl;
+            std::cout << "RPC_fetchfile " << path << " size:" << size << " elapsed:" << elapsed << std::endl;
         }
 
         return Status::OK;
@@ -422,14 +433,15 @@ class GreeterServiceImpl final : public Greeter::Service {
                 print_debug("get_random_name--read", "/dev/random",ret);
                 return std::string("");
             }
-            buffer[i] = 'a' + ch % 26;
+            if(ch<0) ch = -ch;
+            buffer[i] = 'a' + (ch % 26);
         }
         close(fd);
         buffer[16] = 0;
         return std::string(buffer);
     }
 
-    Status RPC_receivefile(ServerContext* context, ServerReader<ReceiveFileRequest>* reader, ReceiveFileResponse* response) override {
+    Status RPC_writeback(ServerContext* context, ServerReader<WritebackRequest>* reader, WritebackResponse* response) override {
         uint64_t start = raw_time();
 
         size_t size = 0;
@@ -437,17 +449,19 @@ class GreeterServiceImpl final : public Greeter::Service {
         // get a temporary file name to land the file while we receive data
         std::string temp = get_random_name();
         if(temp.length()==0) {
-            print_debug("RPC_receivefile--get_random_name", temp, 0);
+            print_debug("RPC_writeback--get_random_name", temp, 0);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
 
+        std::cout << "random_name:"<<temp<<"!"<<std::endl;
+
         // set temp to the full path in our filesystem.
-        temp = root+"/staging/"+get_random_name();
+        temp = root+"/staging/"+temp;
 
         int fd = open(temp.c_str(), O_WRONLY | O_CREAT);
         if (fd == -1) {
-            print_debug("RPC_receivefile--open", temp, fd);
+            print_debug("RPC_writeback--open", temp, fd);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -459,7 +473,8 @@ class GreeterServiceImpl final : public Greeter::Service {
         uint32_t uid;
         uint32_t gid ;
         print_debug("0", temp, fd);
-        ReceiveFileRequest data;
+
+        WritebackRequest data;
         while (reader->Read(&data)) {
             print_debug("a", temp, fd);
             if(isFirst) {
@@ -480,16 +495,17 @@ class GreeterServiceImpl final : public Greeter::Service {
                 // got an error
                 close(fd);
                 unlink(temp.c_str());
-                print_debug("RPC_receivefile--write", temp, fd);
+                print_debug("RPC_writeback--write", temp, fd);
                 response->set_result(errno ? errno : EINVAL);
                 return Status::OK;
             }
             print_debug("d", temp, fd);
         }
+
         print_debug("1", temp, fd);
         // WTF? we did not get anything from the stream
         if(isFirst) {
-            print_debug("RPC_receivefile--close", filename, 0);
+            print_debug("RPC_writeback--close", filename, 0);
             response->set_result(EINVAL);
             return Status::OK;
         }
@@ -497,7 +513,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         int result = close(fd);
         if(result) {
             unlink(temp.c_str());
-            print_debug("RPC_receivefile--close", temp, result);
+            print_debug("RPC_writeback--close", temp, result);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -505,7 +521,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         // make sure we wrote the same number of bytes that the client asked us to write
         if(size != expected_size) {
             unlink(temp.c_str());
-            print_debug("RPC_receivefile--wrong size received", temp, result);
+            print_debug("RPC_writeback--wrong size received", temp, result);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -514,7 +530,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         result = chmod(temp.c_str(), mode);
         if (result < 0) {
             unlink(temp.c_str());
-            print_debug("RPC_receivefile--chmod", temp, result);
+            print_debug("RPC_writeback--chmod", temp, result);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -523,7 +539,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         result = chown(temp.c_str(), uid, gid);
         if (result < 0) {
             unlink(temp.c_str());
-            print_debug("RPC_receivefile--chown", temp, result);
+            print_debug("RPC_writeback--chown", temp, result);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -548,7 +564,7 @@ class GreeterServiceImpl final : public Greeter::Service {
         result = rename(temp.c_str(), newpath.c_str());
         if (result < 0) {
             unlink(temp.c_str());
-            print_debug("RPC_receivefile--rename", temp, result);
+            print_debug("RPC_writeback--rename", temp, result);
             response->set_result(errno ? errno : EINVAL);
             return Status::OK;
         }
@@ -557,14 +573,14 @@ class GreeterServiceImpl final : public Greeter::Service {
 //        memset(&buf, 0, sizeof(struct stat));
 //        result = lstat(newpath.c_str(), &buf);
 //        if (result < 0) {
-//            print_debug("RPC_receivefile--lstat", newpath, result);
+//            print_debug("RPC_writeback--lstat", newpath, result);
 //            response->set_result(errno ? errno : EINVAL);
 //            return Status::OK;
 //        }
 
         if( debug_flag) {
             uint64_t elapsed = raw_time() - start;
-            std::cout << "RPC_receivefile " << filename << " size:" << size << " elapsed:" << elapsed << std::endl;
+            std::cout << "RPC_writeback " << filename << " size:" << size << " elapsed:" << elapsed << std::endl;
         }
 
         response->set_result(0);
