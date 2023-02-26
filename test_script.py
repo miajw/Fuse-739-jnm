@@ -1,24 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Feb 23 15:45:07 2023
-
-@author: miaweaver
-"""
-import random, string
-
-from os import listdir, path, makedirs
-from datetime import datetime
-
-import matplotlib.pyplot as plt 
-
-NUM_CONSEC_OPS = 100
-CONSEC_TEST__FILE_SIZE = 2000
-FILE_SIZE_RANGE = [2**j for j in range(1,20)]
-
-##CHANGE DIR_NAME TO TEST ON FUSE FILE SERVER...
-DIR_NAME = "/users/lidukhov/P1/root/filesystem/" ##for FUSE test...
-#DIR_NAME = "/Users/miaweaver/Documents/Graduate/Coursework/Spring_2023/CS739/P1/Fuse-739-jnm/" ##for Mia's local test...
+#''''''''''''''''' CODE DESCRIPTION '''''''''''''''''
 
 ##different_file_size_writes() writes a string of n = 2, 4, 8, 16, 32, ... , 524288 bytes to a file
  #it times each write then plots the bytes number of the file to the time to write
@@ -28,6 +8,34 @@ DIR_NAME = "/users/lidukhov/P1/root/filesystem/" ##for FUSE test...
  
 ##consec_file_accesses_test("524288.txt") reads a string of n = 524288 bytes from a file (written during
  #first test). It timese each read then plots the access order against the time to read
+
+##outputs from test are plotted and saved in "/plots/" in the specified PLOTS_OUTPUT_FOLDER
+
+#''''''''''''''''' IMPORTS '''''''''''''''''
+
+import random, string
+
+from os import listdir, path, makedirs
+from datetime import datetime
+
+import matplotlib.pyplot as plt 
+
+#''''''''''''''''' CONSTANTS '''''''''''''''''
+
+
+NUM_CONSEC_OPS = 100
+CONSEC_TEST__FILE_SIZE = 2000
+FILE_SIZE_RANGE = [2**j for j in range(1,20)]
+
+#------- READ HERE ---------
+##CHANGE DIR_NAME TO TEST ON FUSE FILE SERVER...
+DIR_NAME = "/users/lidukhov/P1/root/filesystem/" ##for FUSE test...
+#DIR_NAME = "/Users/miaweaver/Documents/Graduate/Coursework/Spring_2023/CS739/P1/Fuse-739-jnm/" ##for Mia's local test...
+
+PLOTS_OUTPUT_FOLDER = "/users/lidukhov/P1/" ##for FUSE test...
+#PLOTS_OUTPUT_FOLDER = "/Users/miaweaver/Documents/Graduate/Coursework/Spring_2023/CS739/P1/Fuse-739-jnm/" ##for Mia's local test...
+
+
 
 #''''''''''''''''' FILE OPS '''''''''''''''''
 
@@ -87,6 +95,15 @@ def plot_latencies(times_by_file, title, xlabel):
     plt.ylabel( "Latency (ms)" )
     plt.xlabel( xlabel )
     plt.title(title)
+    
+    folder = PLOTS_OUTPUT_FOLDER + "plots/"
+    
+    if not path.exists(folder):
+        makedirs(folder)
+    print(folder + title)
+    plt.savefig(folder + title + ".png", bbox_inches='tight')
+    plt.show()
+
     return
 
 #'''''''' END PLOT FILE OP LATENCIES ''''''''
